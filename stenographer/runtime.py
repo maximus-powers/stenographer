@@ -61,13 +61,26 @@ class Runtime:
     # is still live, so they behave normally the rest of the time.
     cycle_keycode: int | None = TAB
     undo_keycode: int | None = BACKSPACE
+    # Pressing the same chord again steps to the next candidate instead of typing a
+    # second word. It is the most direct correction there is, since the fingers are
+    # already in position and no other key has to be learned.
+    #
+    # The window is what makes typing the same word twice still possible. Beyond it a
+    # repeat is taken at face value, and within it a space also ends the correction, so
+    # "the the" is chord, space, chord.
+    repeat_cycles: bool = True
+    repeat_window_ms: float = 1500.0
     # Needed to tell which printable character a non-letter key produces, so the composer
     # can act on punctuation. The tap owns the real one; without it only the keys that are
     # the same on every layout are recognised.
     layout: object | None = None
-    on_text: Callable[[str], None] | None = None
+    # Reports text reaching the application. `backspaces` are removed before the text is
+    # added, which is how a correction is described.
+    on_text: Callable[..., None] | None = None
     on_nav: Callable[[str], None] | None = None
     stats: RuntimeStats = field(default_factory=RuntimeStats)
+    last_chord: str = ""
+    last_chord_ms: float = 0.0
 
     # -- the tap's question ---------------------------------------------------
 
@@ -147,6 +160,7 @@ class Runtime:
         """
         self.stats.letters += len(action.events)
         self.composer.invalidate()
+        self.last_chord = ""
         text = "".join(_with_case(held) for held in action.events)
         if text:
             self.emitter.type_text(text)
@@ -154,10 +168,15 @@ class Runtime:
             self.on_text(text)
 
     def _commit(self, action: CommitChord) -> None:
+        if self._repeats_last(action) and self._cycle():
+            self.last_chord_ms = action.t_ms
+            return
+
         candidates = self.predict(action)
         if not candidates:
             self.stats.no_candidates += 1
             self.composer.invalidate()
+            self.last_chord = ""
             # Nothing contains these letters, so give the user what they pressed rather
             # than swallowing the keystrokes entirely.
             self.emitter.type_text(action.press_order)
@@ -166,17 +185,49 @@ class Runtime:
             return
 
         self.stats.chords += 1
+        self.last_chord = action.letters
+        self.last_chord_ms = action.t_ms
         word = candidates[0]
         for operation in self.composer.commit(word, candidates[:CANDIDATES]):
             self._apply(operation)
         if self.on_text is not None:
             self.on_text(word + " ")
 
+    def _repeats_last(self, action: CommitChord) -> bool:
+        """Was this the same chord again, soon enough to mean "not that word"?"""
+        if not self.repeat_cycles or action.letters != self.last_chord:
+            return False
+        if self.composer.last is None or not self.composer.last.live:
+            return False
+        return action.t_ms - self.last_chord_ms <= self.repeat_window_ms
+
+    def _cycle(self, forward: bool = True) -> bool:
+        """Replace the last word with the next candidate. Returns whether it happened."""
+        operations = self.composer.cycle(forward=forward)
+        if not operations:
+            return False
+        self.stats.cycles += 1
+        removed, added = self._apply_all(operations)
+        if self.on_text is not None:
+            self.on_text(added, removed)
+        return True
+
     def _apply(self, operation) -> None:
         if isinstance(operation, TypeText):
             self.emitter.type_text(operation.text)
         elif isinstance(operation, Backspaces):
             self.emitter.backspace(operation.count)
+
+    def _apply_all(self, operations) -> tuple[int, str]:
+        """Carry out operations and report the net effect, for context tracking."""
+        removed, added = 0, []
+        for operation in operations:
+            self._apply(operation)
+            if isinstance(operation, Backspaces):
+                removed += operation.count
+            elif isinstance(operation, TypeText):
+                added.append(operation.text)
+        return removed, "".join(added)
 
     # -- repairing the last word ----------------------------------------------
 
@@ -192,21 +243,17 @@ class Runtime:
             return None
 
         if self.cycle_keycode is not None and event.keycode == self.cycle_keycode:
-            operations = self.composer.cycle(forward=not event.shift)
-            if not operations:
-                return "pass"
-            self.stats.cycles += 1
-            for operation in operations:
-                self._apply(operation)
-            return "handled"
+            return "handled" if self._cycle(forward=not event.shift) else "pass"
 
         if self.undo_keycode is not None and event.keycode == self.undo_keycode:
             operations = self.composer.undo()
             if not operations:
                 return "pass"
             self.stats.undos += 1
-            for operation in operations:
-                self._apply(operation)
+            self.last_chord = ""
+            removed, added = self._apply_all(operations)
+            if self.on_text is not None:
+                self.on_text(added, removed)
             return "handled"
 
         return None

@@ -3,9 +3,15 @@
 This is the crux of the whole idea. A fast typist overlaps a large share of consecutive
 keystrokes, so "two keys were down at once" is nowhere near enough evidence on its own.
 Too loose a test and ordinary typing produces spurious words; too tight and deliberate
-chords are missed. The detector therefore weighs three separate pieces of evidence: how
-closely the presses arrived, how many keys were down at one instant, and how long they
-overlapped before the first release.
+chords are missed.
+
+The way out is to stop relying on speed. A chord gets a full second to be formed, and
+what marks it out instead is that every one of its keys was down at the same moment. A
+typist releases each key about as the next goes down, so ordinary typing never gets three
+keys down together however fast it goes, while a deliberate press can be made as slowly
+as the hand likes. Two keys are the weak case, since a pair overlapping is exactly what
+rollover looks like, so a pair additionally has to be held together long enough to have
+been meant.
 
 It is a pure state machine. Every input is a `KeyEvent` or a timer tick, and every output
 is an `Action` for the emitter to carry out. Nothing here touches the keyboard, so the
@@ -37,26 +43,34 @@ class Trigger(Enum):
 
 @dataclass(frozen=True)
 class DetectorConfig:
-    # Window from the first keydown in which further letters join the same group. A
-    # deliberate multi-finger press spreads over roughly 10-40 ms, while typing at 120 wpm
-    # averages 100-120 ms between keydowns and its fastest digraphs sit near 60 ms.
-    join_ms: float = 50.0
-    # A late finger may still join up to here, but only while nothing has been released.
-    # Rollover releases the earlier key soon after the next goes down, so "several keys
-    # down and none released yet" is what separates intent from overlap.
-    late_ms: float = 120.0
-    # A two-key group must overlap at least this long, measured from the second keydown to
-    # the first release. Without it, ordinary rollover would fire chords constantly.
+    # How long a whole chord gesture may take, from the first key going down to the last
+    # coming up. A second is a comfortable amount of time to place three or four fingers
+    # deliberately, and it is far longer than any single keystroke in ordinary typing.
+    chord_max_ms: float = 1000.0
+    # A lone key that is still down after this long is sent on its own. Until then it is
+    # held back, because another finger may still be coming to join it, and cutting this
+    # short would break up a slowly formed chord.
+    #
+    # This costs ordinary typing nothing, which is easy to get wrong: a normal keystroke
+    # is decided the moment it is released, not when this expires, so the letter appears
+    # as the finger lifts. What it does affect is holding a letter key down to repeat it,
+    # where the first character waits this long. Prose rarely does that, and the places
+    # that do, terminals and editors, are on the deny-list anyway. Lower it if key repeat
+    # matters more than a leisurely chord.
+    lone_hold_ms: float = 1000.0
+    # A two-key group needs this much simultaneous hold, measured from the second key
+    # going down to the first coming up. Two keys overlapping is the single weakest
+    # signal there is, because that is exactly what fast typing looks like, so a pair has
+    # to be held together long enough to be deliberate.
     two_key_overlap_ms: float = 60.0
-    # A group whose keys are all still down this long was not a deliberate quick press;
-    # most likely fingers are resting on the keyboard.
-    hold_max_ms: float = 600.0
     min_keys: int = 2
     # Laptop keyboards register about six non-modifier keys at once; more than that means
     # ghosting or a rollover burst rather than a chord.
     max_keys: int = 6
-    # Require this many keys to have been down at one instant. Without it, a
-    # press-release-press sequence inside the join window would count as a chord.
+    # Require every key in the chord to have been down at one instant. This is what makes
+    # a long gesture safe: the time limit alone would swallow whole words of ordinary
+    # typing, but rollover never gets three keys down together, so demanding that all of
+    # them overlap separates intent from speed without needing a narrow window.
     require_simultaneous: bool = True
     trigger: Trigger = Trigger.HOLDBACK
 
@@ -196,17 +210,13 @@ class ChordDetector:
         config = self.config
         if group is None:
             return None
-        cap = group.t0 + config.hold_max_ms
         if len(group.events) < config.min_keys:
-            # A lone letter is sent as soon as it can no longer become a chord.
-            return group.t0 + config.join_ms
-        if group.released_any:
-            return group.t0 + config.join_ms
-        if len(group.events) == 2:
-            # Two keys need a minimum overlap, which can outlast the late window.
-            overlap_deadline = group.last_down_ms + config.two_key_overlap_ms
-            return min(max(group.t0 + config.late_ms, overlap_deadline), cap)
-        return min(group.t0 + config.late_ms, cap)
+            # Still one key. It is held back in case a second finger is coming, but not
+            # past the point where key repeat should have started.
+            return group.t0 + config.lone_hold_ms
+        # Enough keys for a chord, so wait for the fingers to lift, or for the gesture to
+        # run out of time.
+        return group.t0 + config.chord_max_ms
 
     def reset(self) -> list[Action]:
         """Abandon any open group, sending its letters through.
@@ -248,14 +258,13 @@ class ChordDetector:
             # The same key pressed twice without a release means its release was lost.
             return self._resolve(event.t_ms) + self._open_group(event)
 
+        # A key joins only while every key already in the group is still down. That single
+        # rule is what lets the gesture take as long as a second without swallowing
+        # ordinary typing: a typist releases each key around the time the next goes down,
+        # so the moment anything has been let go the group is closed and a new one starts.
+        # It also means the keys of a chord were necessarily all down at one instant.
         elapsed = event.t_ms - group.t0
-        joins_now = elapsed <= config.join_ms
-        joins_late = (
-            elapsed <= config.late_ms
-            and not group.released_any
-            and len(group.events) >= 2
-        )
-        if joins_now or joins_late:
+        if not group.released_any and elapsed <= config.chord_max_ms:
             # A key that pushes the group past `max_keys` still joins it. Rejecting the
             # extra key instead would leave a full-sized group behind and commit it as a
             # chord, when the whole burst is what looks wrong: too many keys at once means
@@ -272,9 +281,12 @@ class ChordDetector:
             group.release(key, event.t_ms)
             # This release is being consumed here, so it no longer needs holding back.
             self.pending_release.discard(key)
-            past_window = event.t_ms - group.t0 >= self.config.join_ms
-            if len(group.events) < self.config.min_keys or past_window:
-                return self._resolve(event.t_ms)
+            if not group.held:
+                # Every finger is off, so the gesture is complete and can be judged. This
+                # is the normal way a group ends, and waiting for it is what allows a
+                # chord to be formed slowly. The release itself is still consumed: it
+                # belongs to a keystroke the application never saw.
+                return [Consume(event), *self._resolve(event.t_ms)]
             return [Consume(event)]
         if key in self.pending_release:
             self.pending_release.discard(key)
@@ -338,10 +350,13 @@ class ChordDetector:
         count = len(group.events)
         if count < config.min_keys or count > config.max_keys:
             return False
-        if config.require_simultaneous and group.max_simultaneous < config.min_keys:
+        if config.require_simultaneous and group.max_simultaneous < count:
+            # Not every key was down together, so this was typing that happened to
+            # overlap rather than a deliberate press.
             return False
-        if group.held and t_ms - group.t0 >= config.hold_max_ms:
-            # Still held after this long: fingers resting, not a deliberate press.
+        if group.held and t_ms - group.t0 >= config.chord_max_ms:
+            # Still held when the time ran out: fingers resting on the keyboard, or a
+            # gesture too slow to have been meant as one.
             return False
         if count == 2:
             release = group.first_release_ms()

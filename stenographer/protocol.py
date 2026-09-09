@@ -18,6 +18,7 @@ slows typing down but never blocks it.
 from __future__ import annotations
 
 import json
+
 # MISSING is the only way to tell a field with no default from one defaulting to None,
 # which is what makes "this message is missing a field" distinguishable from "this field
 # is None".
@@ -87,9 +88,16 @@ class PredictRequest(Message):
 
 @dataclass(frozen=True)
 class Typed(Message):
-    """Characters that reached the application, so the brain can follow the text."""
+    """Characters that reached the application, so the brain can follow the text.
+
+    `backspaces` are removed before `text` is appended, which is how a correction is
+    reported. Cycling to another candidate rewrites the word already on screen, and
+    without this the brain's copy of the text would keep the word the user rejected and
+    condition its next prediction on it.
+    """
 
     text: str
+    backspaces: int = 0
 
 
 @dataclass(frozen=True)

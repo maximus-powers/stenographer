@@ -3,9 +3,14 @@
 Type a word by pressing several of its letters at once, like a stenographer, and let a
 model work out which word you meant from those letters and the sentence so far.
 
-Press `t`, `h` and `e` together and you get "the". Press `b`, `c` and `s` together and
-you get "because". Press one letter at a time and nothing changes: single presses are
-passed straight through, so ordinary typing always works.
+Press `t`, `h` and `e` together and you get "the ", space included. Press `b`, `c` and
+`s` together and you get "because ". Wrong word? Press the same chord again and it steps
+to the next candidate, so `{e,h,t}` twice gives "they" and a third time "their". Press
+one letter at a time and nothing changes: single presses are passed straight through, so
+ordinary typing always works.
+
+You have a full second to form a chord. There is no need to hit the keys at the same
+instant, only to have them all down together at some point before you lift your fingers.
 
 ## Does it actually save time?
 
@@ -142,12 +147,21 @@ back to the local index instead of stalling. A late reply is matched against the
 was asked about and discarded if it belongs to a request already given up on, so a slow
 answer can never be attributed to the wrong chord.
 
-**Telling a chord from fast typing** is the hard part. Fast typists overlap a large share
-of consecutive keystrokes, so "two keys were down together" means very little on its own.
-The detector weighs three things: how closely the presses arrived (50 ms to join a group),
-how many keys were down at one instant, and how long a pair overlapped before the first
-release (60 ms). Keys still held after 600 ms are fingers resting on the keyboard, not a
-chord.
+**Telling a chord from fast typing** is the hard part, and the answer is not to measure
+speed. A chord gets a full second, and what marks it out instead is that every one of its
+keys was down at the same moment. A typist releases each key about as the next goes down,
+so ordinary typing never gets three keys down together however fast it goes, while a
+deliberate press can be made as slowly as the hand likes. Keys still down when the second
+runs out are fingers resting on the keyboard, not a chord.
+
+Two keys are the weak case, because a pair overlapping is exactly what rollover looks
+like, so a pair also has to be held together for 60 ms to count. All three numbers are
+flags: `--chord-max`, `--lone-hold`, `--overlap`.
+
+Waiting for your fingers to lift costs ordinary typing nothing, which is easy to get
+wrong. A single keystroke is decided the moment it is released, not when the second
+expires, so the letter appears as the finger comes up. What it does affect is holding a
+letter key down to repeat it, where the first character waits out `--lone-hold`.
 
 Two alternatives are one config flag away, because which one suits real hands is a
 question for the dry run rather than for a design document. `--trigger optimistic` types
@@ -155,9 +169,15 @@ letters immediately and takes them back when a chord forms, costing no latency b
 flickering. `--trigger hold_to_chord` only forms chords while a modifier is held, which
 cannot produce a false chord at all.
 
-**Around the word.** A committed word gets a space after it. Punctuation typed next pulls
-that space back so "there" plus a comma gives "there, ". A second space is swallowed. Tab
-steps through the alternatives; Backspace removes the whole word. Casing comes from the
+**Around the word.** A committed word gets a space after it, so chords run together into
+a sentence without touching the space bar. Punctuation typed next pulls that space back,
+so "there" plus a comma gives "there, ". A second space is swallowed.
+
+**Fixing a wrong guess.** Press the same chord again and it steps to the next candidate,
+which needs no new key and leaves your fingers where they are. Tab does the same thing,
+Shift-Tab goes back, and Backspace removes the word entirely. A repeat only counts as a
+correction within a second and a half, so a word can still be typed twice: chord, space,
+chord. Casing comes from the
 vocabulary first, then Shift and Caps Lock, then sentence position, and stays lowercase
 when the evidence is thin, because capitalising an ordinary word mid-sentence is the most
 visible way this can look broken.

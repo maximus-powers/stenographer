@@ -93,8 +93,8 @@ def build(args) -> tuple[Runtime, EventTap, Emitter, Predictor, BrainClient | No
 
     detector = ChordDetector(
         DetectorConfig(
-            join_ms=args.join,
-            late_ms=args.late,
+            chord_max_ms=args.chord_max,
+            lone_hold_ms=args.lone_hold,
             two_key_overlap_ms=args.overlap,
             min_keys=args.min_keys,
             max_keys=args.max_keys,
@@ -103,9 +103,9 @@ def build(args) -> tuple[Runtime, EventTap, Emitter, Predictor, BrainClient | No
     )
     composer = TextComposer(ComposerConfig(auto_space=not args.no_auto_space))
 
-    def on_text(text: str) -> None:
+    def on_text(text: str, backspaces: int = 0) -> None:
         if client is not None:
-            client.notify(Typed(text=text))
+            client.notify(Typed(text=text, backspaces=backspaces))
 
     def on_nav(_kind: str) -> None:
         if client is not None:
@@ -152,8 +152,12 @@ def main() -> None:
     parser.add_argument("--socket", type=Path, default=None)
     parser.add_argument("--no-daemon", action="store_true", help="frequency index only")
     parser.add_argument("--deadline", type=float, default=50.0, help="ms to wait for the daemon")
-    parser.add_argument("--join", type=float, default=50.0, help="ms for keys to join a chord")
-    parser.add_argument("--late", type=float, default=120.0, help="ms for a late finger")
+    parser.add_argument(
+        "--chord-max", type=float, default=1000.0, help="ms a whole chord gesture may take"
+    )
+    parser.add_argument(
+        "--lone-hold", type=float, default=1000.0, help="ms to hold a single key back"
+    )
     parser.add_argument("--overlap", type=float, default=60.0, help="ms of overlap a pair needs")
     parser.add_argument("--min-keys", type=int, default=2)
     parser.add_argument("--max-keys", type=int, default=6)
@@ -183,7 +187,10 @@ def main() -> None:
     print("stenographer")
     print(f"  mode          {'dry run, nothing is typed' if args.dry_run else 'live'}")
     print(f"  trigger       {args.trigger}, {args.min_keys}+ keys")
-    print(f"  timing        join {args.join:.0f} ms, late {args.late:.0f} ms, overlap {args.overlap:.0f} ms")
+    print(
+        f"  timing        up to {args.chord_max:.0f} ms per chord, "
+        f"single key held {args.lone_hold:.0f} ms, pair overlap {args.overlap:.0f} ms"
+    )
     print(f"  predictions   {'local frequency index' if client is None else f'daemon at {args.socket or socket_path()}'}")
     if secure_input_enabled():
         print("  note          Secure Input is on; no keystrokes will be seen")

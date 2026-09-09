@@ -59,6 +59,18 @@ def test_a_committed_word_is_followed_by_a_space(composer):
     assert screen.text == "there "
 
 
+def test_the_automatic_space_is_on_by_default():
+    assert ComposerConfig().auto_space is True
+
+
+def test_consecutive_words_are_spaced_without_the_user_typing_anything():
+    composer = TextComposer()
+    screen = Screen()
+    for word in ["I", "went", "there", "today"]:
+        screen.apply(composer.commit(word))
+    assert screen.text == "I went there today "
+
+
 def test_a_leading_space_is_added_when_asked(composer):
     screen = Screen("hello").apply(composer.commit("there", needs_leading_space=True))
     assert screen.text == "hello there "

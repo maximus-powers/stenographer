@@ -258,6 +258,89 @@ def test_arrow_keys_invalidate_the_pending_word():
     assert keep is True
 
 
+# -- repeating a chord cycles --------------------------------------------------
+
+
+def test_the_same_chord_again_steps_to_the_next_candidate():
+    harness = Harness().feed(*chord("t", "h", "e")).settle()
+    assert harness.text == "the "
+    harness.feed(*chord("t", "h", "e", start=400)).settle()
+    assert harness.text == "they "
+    harness.feed(*chord("t", "h", "e", start=800)).settle()
+    assert harness.text == "their "
+
+
+def test_repeating_wraps_around_the_candidate_list():
+    harness = Harness().feed(*chord("t", "h", "e")).settle()
+    for step in range(1, 6):  # five candidates, so five repeats returns to the first
+        harness.feed(*chord("t", "h", "e", start=400 * step)).settle()
+    assert harness.text == "the "
+
+
+def test_a_repeat_does_not_add_a_second_word():
+    harness = Harness().feed(*chord("t", "h", "e")).settle()
+    harness.feed(*chord("t", "h", "e", start=400)).settle()
+    assert harness.text.count("the") <= 1
+    assert harness.runtime.stats.chords == 1
+    assert harness.runtime.stats.cycles == 1
+
+
+def test_a_repeat_after_the_window_is_a_new_word():
+    harness = Harness().feed(*chord("t", "h", "e")).settle()
+    harness.runtime.repeat_window_ms = 1500.0
+    harness.feed(*chord("t", "h", "e", start=4000)).settle()
+    assert harness.text == "the the "
+
+
+def test_a_space_between_repeats_gives_the_word_twice():
+    """The natural way to type a word twice: chord, space, chord."""
+    harness = Harness().feed(*chord("t", "h", "e")).settle()
+    harness.feed(space(400))
+    harness.feed(*chord("t", "h", "e", start=600)).settle()
+    assert harness.text == "the the "
+
+
+def test_a_different_chord_is_never_a_cycle():
+    harness = Harness().feed(*chord("t", "h", "e")).settle()
+    harness.feed(*chord("b", "c", "e", "s", start=400)).settle()
+    assert harness.text == "the because "
+
+
+def test_typing_between_repeats_ends_the_correction():
+    harness = Harness().feed(*chord("t", "h", "e")).settle()
+    harness.feed(*typed("x", start=400))
+    harness.feed(*chord("t", "h", "e", start=800)).settle()
+    assert harness.text == "the xthe "
+
+
+def test_repeat_cycling_can_be_switched_off():
+    harness = Harness()
+    harness.runtime.repeat_cycles = False
+    harness.feed(*chord("t", "h", "e")).settle()
+    harness.feed(*chord("t", "h", "e", start=400)).settle()
+    assert harness.text == "the the "
+
+
+def test_the_cycle_key_and_a_repeat_agree():
+    by_key = Harness().feed(*chord("t", "h", "e")).settle()
+    by_key.feed(down("", 400, keycode=TAB))
+    by_repeat = Harness().feed(*chord("t", "h", "e")).settle()
+    by_repeat.feed(*chord("t", "h", "e", start=400)).settle()
+    assert by_key.text == by_repeat.text == "they "
+
+
+def test_a_correction_is_reported_so_context_can_follow_it():
+    """The daemon has to be told the rejected word was removed, not just that one arrived."""
+    reported: list[tuple[str, int]] = []
+    harness = Harness()
+    harness.runtime.on_text = lambda text, backspaces=0: reported.append((text, backspaces))
+    harness.feed(*chord("t", "h", "e")).settle()
+    harness.feed(*chord("t", "h", "e", start=400)).settle()
+    assert reported[0] == ("the ", 0)
+    # Four characters removed ("the " with its space), then the replacement.
+    assert reported[1] == ("they ", 4)
+
+
 # -- nothing is lost -----------------------------------------------------------
 
 

@@ -83,6 +83,22 @@ def test_context_keeps_the_most_recent_text():
     assert context.text.endswith("the newest words")
 
 
+def test_a_correction_rewrites_the_context():
+    """Cycling replaces the word on screen, so the context must drop the rejected one."""
+    context = Context()
+    context.add("I went the ")
+    context.add("they ", backspaces=len("the "))
+    assert context.text == "I went they "
+
+
+def test_deleting_more_than_is_known_gives_up_rather_than_guessing():
+    context = Context()
+    context.add("the ")
+    context.add("x", backspaces=99)
+    assert context.text == ""
+    assert context.known is False
+
+
 def test_invalidating_context_marks_it_unknown():
     context = Context()
     context.add("I went ")

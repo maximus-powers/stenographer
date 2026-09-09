@@ -49,7 +49,16 @@ class Context:
     text: str = ""
     known: bool = True
 
-    def add(self, addition: str) -> None:
+    def add(self, addition: str, backspaces: int = 0) -> None:
+        """Append text, first removing `backspaces` characters to mirror a correction."""
+        if backspaces > 0:
+            if backspaces >= len(self.text):
+                # More was deleted than we know about, so the tail we hold is no longer a
+                # true picture of what is on screen.
+                self.text = ""
+                self.known = False
+                return
+            self.text = self.text[:-backspaces]
         self.text = (self.text + addition)[-CONTEXT_CHARS:]
         self.known = True
 
@@ -88,7 +97,7 @@ class Brain:
         if isinstance(message, PredictRequest):
             return self._predict(message)
         if isinstance(message, Typed):
-            self.context.add(message.text)
+            self.context.add(message.text, message.backspaces)
             return None
         if isinstance(message, Nav):
             self.context.invalidate()

@@ -74,7 +74,10 @@ def test_three_keys_pressed_together_is_a_chord():
 
 def test_chord_letters_are_sorted_and_press_order_is_kept_separately():
     detector = ChordDetector()
-    actions = run(detector, [down("t", 0), down("h", 10), down("e", 20), up("t", 140)])
+    actions = run(
+        detector,
+        [down("t", 0), down("h", 10), down("e", 20), up("t", 140), up("h", 150), up("e", 160)],
+    )
     commit = next(a for a in actions if isinstance(a, CommitChord))
     assert commit.letters == "eht"
     assert commit.press_order == "the"
@@ -84,7 +87,16 @@ def test_a_late_finger_joins_while_nothing_has_been_released():
     detector = ChordDetector()
     actions = run(
         detector,
-        [down("t", 0), down("h", 20), down("e", 40), down("r", 70), up("t", 200)],
+        [
+            down("t", 0),
+            down("h", 20),
+            down("e", 40),
+            down("r", 70),
+            up("t", 200),
+            up("h", 210),
+            up("e", 220),
+            up("r", 230),
+        ],
     )
     assert chords(actions) == ["ehrt"]
 
@@ -102,7 +114,8 @@ def test_a_late_finger_is_rejected_once_a_key_has_been_released():
 
 def test_five_key_chord():
     detector = ChordDetector()
-    events = [down(k, i * 8) for i, k in enumerate("stgnr")] + [up("s", 200)]
+    events = [down(k, i * 8) for i, k in enumerate("stgnr")]
+    events += [up(k, 200 + i * 8) for i, k in enumerate("stgnr")]
     assert chords(run(detector, events)) == ["gnrst"]
 
 
@@ -125,13 +138,27 @@ def test_a_single_tap_is_typed_normally():
     assert typed(actions) == "a"
 
 
-def test_a_single_held_key_is_emitted_when_the_join_window_closes():
+def test_a_single_held_key_is_eventually_emitted_on_its_own():
     detector = ChordDetector()
     actions = run(detector, [down("a", 0)])
     letters = [a for a in actions if isinstance(a, TypeLetters)]
     assert letters and letters[0].letters == "a"
     # Still held, so the real release must reach the application and repeat keeps working.
     assert letters[0].synthetic_up is False
+
+
+def test_a_released_key_is_emitted_at_once_not_after_the_hold_limit():
+    """Normal typing must not wait for the chord budget to expire.
+
+    A keystroke is decided when it is released, so the letter appears as the finger
+    lifts. Getting this wrong would put a second of latency on every character.
+    """
+    detector = ChordDetector(DetectorConfig(lone_hold_ms=1000.0))
+    actions = []
+    for event in [down("a", 0), up("a", 70)]:
+        actions.extend(detector.feed(event))
+    assert typed(actions) == "a"
+    assert detector.group is None
 
 
 @pytest.mark.parametrize("interval", [60, 80, 100, 140, 200])
@@ -179,9 +206,11 @@ def test_two_keys_with_too_little_overlap_are_letters():
 def test_the_two_key_overlap_threshold_is_the_boundary():
     config = DetectorConfig(two_key_overlap_ms=60.0)
     just_short = ChordDetector(config)
-    assert chords(run(just_short, [down("t", 0), down("o", 20), up("t", 79)])) == []
+    assert chords(run(just_short, [down("t", 0), down("o", 20), up("t", 79), up("o", 90)])) == []
     just_enough = ChordDetector(config)
-    assert chords(run(just_enough, [down("t", 0), down("o", 20), up("t", 81)])) == ["ot"]
+    assert chords(
+        run(just_enough, [down("t", 0), down("o", 20), up("t", 81), up("o", 90)])
+    ) == ["ot"]
 
 
 def test_a_second_press_after_the_window_starts_a_new_group():
@@ -191,6 +220,87 @@ def test_a_second_press_after_the_window_starts_a_new_group():
     assert typed(actions) == "ab"
 
 
+# -- a chord may be formed slowly -----------------------------------------------
+
+
+@pytest.mark.parametrize("spread", [20, 150, 400, 700, 900])
+def test_a_chord_can_be_formed_slowly(spread):
+    """Fingers may arrive over most of a second, so long as none has left yet.
+
+    This is what the one-second budget is for: there is no need to hit the keys at the
+    same instant, only to have them all down together at some point before lifting.
+    """
+    detector = ChordDetector()
+    step = spread / 2
+    events = [down("t", 0), down("h", step), down("e", spread)]
+    events += [up(k, spread + 40 + i * 10) for i, k in enumerate("the")]
+    assert chords(run(detector, events)) == ["eht"]
+
+
+def test_a_gesture_slower_than_the_limit_is_not_a_chord():
+    detector = ChordDetector(DetectorConfig(chord_max_ms=1000.0))
+    events = [down("t", 0), down("h", 400), down("e", 1400)]
+    events += [up(k, 1500 + i * 10) for i, k in enumerate("the")]
+    actions = run(detector, events)
+    # "t" and "h" overlapped long enough to be a pair; "e" arrived too late to join them.
+    assert "eht" not in chords(actions)
+
+
+def test_keys_still_down_when_the_time_runs_out_are_typed_as_letters():
+    detector = ChordDetector(DetectorConfig(chord_max_ms=1000.0))
+    actions = run(detector, [down("t", 0), down("h", 20), down("e", 40)], settle=False)
+    actions.extend(detector.on_timer(1200))
+    assert chords(actions) == []
+    assert typed(actions) == "the"
+
+
+def test_a_roll_where_a_finger_leaves_early_is_not_a_chord():
+    """Three keys touched in sequence, never all down together, is typing.
+
+    This is the case a wide time limit would otherwise swallow: at 120 words per minute
+    the keys of a word overlap in pairs, and only the requirement that every key be down
+    at one instant tells that apart from a deliberate press.
+    """
+    detector = ChordDetector()
+    actions = run(
+        detector,
+        [
+            down("t", 0),
+            down("h", 60),
+            up("t", 90),  # gone before "e" arrives
+            down("e", 120),
+            up("h", 150),
+            up("e", 200),
+        ],
+    )
+    assert chords(actions) == []
+    assert typed(actions) == "the"
+
+
+def test_a_whole_word_typed_with_heavy_rollover_produces_no_chord():
+    """Every consecutive pair overlaps, which is what a fast typist really does."""
+    detector = ChordDetector()
+    events: list[KeyEvent] = []
+    interval = 60
+    for position, key in enumerate("keyboard"):
+        start = position * interval
+        events.append(down(key, start))
+        events.append(up(key, start + interval + 25))  # released 25 ms into the next key
+    actions = run(detector, events)
+    assert chords(actions) == []
+    assert typed(actions) == "keyboard"
+
+
+def test_the_time_limit_is_configurable():
+    quick = ChordDetector(DetectorConfig(chord_max_ms=200.0))
+    slow_gesture = [down("t", 0), down("h", 150), down("e", 300)]
+    slow_gesture += [up(k, 400 + i * 10) for i, k in enumerate("the")]
+    assert chords(run(quick, slow_gesture)) == []
+
+    patient = ChordDetector(DetectorConfig(chord_max_ms=2000.0))
+    assert chords(run(patient, slow_gesture)) == ["eht"]
+
+
 # -- modifiers, non-letters, repeats --------------------------------------------
 
 
@@ -198,7 +308,14 @@ def test_shift_held_during_a_chord_is_reported():
     detector = ChordDetector()
     actions = run(
         detector,
-        [down("t", 0, shift=True), down("h", 12, shift=True), down("e", 22), up("t", 150)],
+        [
+            down("t", 0, shift=True),
+            down("h", 12, shift=True),
+            down("e", 22),
+            up("t", 150),
+            up("h", 160),
+            up("e", 170),
+        ],
     )
     commit = next(a for a in actions if isinstance(a, CommitChord))
     assert commit.shift is True
@@ -208,7 +325,13 @@ def test_shift_held_during_a_chord_is_reported():
 def test_caps_lock_is_reported():
     detector = ChordDetector()
     actions = run(
-        detector, [down("t", 0, caps_lock=True), down("h", 12, caps_lock=True), up("t", 150)]
+        detector,
+        [
+            down("t", 0, caps_lock=True),
+            down("h", 12, caps_lock=True),
+            up("t", 150),
+            up("h", 160),
+        ],
     )
     commit = next(a for a in actions if isinstance(a, CommitChord))
     assert commit.caps_lock is True
@@ -241,7 +364,13 @@ def test_autorepeat_inside_a_group_is_dropped():
     detector = ChordDetector()
     actions = run(
         detector,
-        [down("t", 0), down("h", 12), down("t", 240, autorepeat=True), up("t", 300)],
+        [
+            down("t", 0),
+            down("h", 12),
+            down("t", 240, autorepeat=True),
+            up("t", 300),
+            up("h", 310),
+        ],
     )
     assert chords(actions) == ["ht"]
 
@@ -264,9 +393,9 @@ def test_flags_changed_events_pass_through():
 
 def test_keys_still_held_after_the_maximum_are_not_a_chord():
     """Fingers resting on the keyboard must not produce a word."""
-    detector = ChordDetector(DetectorConfig(hold_max_ms=600.0))
+    detector = ChordDetector(DetectorConfig(chord_max_ms=1000.0))
     actions = run(detector, [down("a", 0), down("s", 20), down("d", 40)], settle=False)
-    actions.extend(detector.on_timer(700))
+    actions.extend(detector.on_timer(1100))
     assert chords(actions) == []
     assert typed(actions) == "asd"
 
@@ -279,13 +408,14 @@ def test_a_lost_release_is_recovered_on_the_next_press_of_that_key():
     assert detector.group is None or "t" in detector.group.held
 
 
-def test_release_of_a_held_back_key_is_swallowed_not_duplicated():
+def test_releases_of_held_back_keys_never_reach_the_application():
     detector = ChordDetector()
-    run(detector, [down("t", 0), down("h", 12), down("e", 22)])
-    # The chord committed at the join window; the real releases must not reach the app.
+    for event in [down("t", 0), down("h", 12), down("e", 22)]:
+        detector.feed(event)
+    # None of the releases may pass through: the application never saw the presses.
     for event in [up("t", 150), up("h", 160), up("e", 170)]:
         actions = detector.feed(event)
-        assert all(isinstance(a, Consume) for a in actions), actions
+        assert not any(isinstance(a, PassThrough) for a in actions), actions
 
 
 def test_reset_flushes_an_open_group():
@@ -311,7 +441,10 @@ def test_disabling_the_detector_passes_everything_through():
 
 def test_optimistic_mode_types_immediately_then_retracts_for_a_chord():
     detector = ChordDetector(DetectorConfig(trigger=Trigger.OPTIMISTIC))
-    actions = run(detector, [down("t", 0), down("h", 12), down("e", 22), up("t", 150)])
+    actions = run(
+        detector,
+        [down("t", 0), down("h", 12), down("e", 22), up("t", 150), up("h", 160), up("e", 170)],
+    )
     assert passed(actions) == "the"
     retractions = [a for a in actions if isinstance(a, Retract)]
     assert [r.count for r in retractions] == [3]
@@ -339,7 +472,10 @@ def test_hold_to_chord_ignores_letters_until_the_modifier_is_down():
 def test_hold_to_chord_forms_a_chord_while_the_modifier_is_down():
     detector = ChordDetector(DetectorConfig(trigger=Trigger.HOLD_TO_CHORD))
     detector.set_chord_modifier(True, 0)
-    actions = run(detector, [down("t", 10), down("h", 22), down("e", 32), up("t", 150)])
+    actions = run(
+        detector,
+        [down("t", 10), down("h", 22), down("e", 32), up("t", 150), up("h", 160), up("e", 170)],
+    )
     assert chords(actions) == ["eht"]
 
 
