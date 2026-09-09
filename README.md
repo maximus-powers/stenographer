@@ -136,6 +136,12 @@ intersecting 26 bitsets in about 40 microseconds. Stopping the daemon makes chor
 accurate; it never stops typing. `kill -STOP` the daemon mid-sentence and keystrokes keep
 flowing.
 
+That deadline is not theoretical. Asked six chords while a training run had the GPU, the
+daemon answered four inside 50 ms at about 10 ms each and missed two, and those two fell
+back to the local index instead of stalling. A late reply is matched against the chord it
+was asked about and discarded if it belongs to a request already given up on, so a slow
+answer can never be attributed to the wrong chord.
+
 **Telling a chord from fast typing** is the hard part. Fast typists overlap a large share
 of consecutive keystrokes, so "two keys were down together" means very little on its own.
 The detector weighs three things: how closely the presses arrived (50 ms to join a group),
