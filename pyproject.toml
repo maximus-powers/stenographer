@@ -1,0 +1,23 @@
+[project]
+name = "stenographer"
+version = "0.1.0"
+description = "Chorded predictive typing for macOS"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0",
+    "wordfreq>=3.1",
+]
+
+[project.optional-dependencies]
+ml = ["torch==2.13.0", "transformers>=5.0", "tokenizers>=0.23", "datasets>=5.0"]
+mac = ["pyobjc-framework-Quartz==12.2.2", "pyobjc-framework-ApplicationServices==12.2.2"]
+dev = ["pytest>=9.0", "hypothesis>=6.0", "ruff>=0.6"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.setuptools.packages.find]
+include = ["stenographer*", "model*"]
