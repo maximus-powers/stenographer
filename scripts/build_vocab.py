@@ -15,7 +15,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--size", type=int, default=vocab_mod.DEFAULT_SIZE)
     parser.add_argument("--out", type=Path, default=Path("data/vocab"))
-    parser.add_argument("--corpus", default="wikitext-103-raw-v1")
+    parser.add_argument("--corpus", default="data/corpus")
     parser.add_argument("--split", default="validation")
     parser.add_argument(
         "--restrict",

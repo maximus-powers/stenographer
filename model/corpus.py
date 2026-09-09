@@ -36,10 +36,26 @@ def tokenise(text: str) -> list[str]:
     return TOKEN_RE.findall(text)
 
 
+def resolve_source(source: str | Path, split: str) -> str | Path:
+    """Point at a local split file when one exists, otherwise leave the name alone.
+
+    Passing a directory picks `<directory>/<split>.txt` from it. Local files matter more
+    than convenience here: reading a large split straight from the Hugging Face cache
+    fetches it lazily in chunks, which once stalled a training run at 5% CPU waiting on
+    the network. `scripts/prepare_corpus.py` writes the files this looks for.
+    """
+    path = Path(source)
+    if path.is_dir():
+        candidate = path / f"{split}.txt"
+        if candidate.exists():
+            return candidate
+    return source
+
+
 def iter_lines(source: str | Path, *, split: str = "test", limit: int | None = None) -> Iterator[str]:
     """Yield raw lines from a local text file or a Hugging Face wikitext split."""
-    path = Path(source)
-    if path.exists():
+    path = Path(resolve_source(source, split))
+    if path.exists() and path.is_file():
         with path.open(encoding="utf-8") as handle:
             for count, line in enumerate(handle):
                 if limit is not None and count >= limit:

@@ -23,7 +23,7 @@ from stenographer.brain.predictor.unigram import UnigramPredictor
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vocab", type=Path, default=Path("data/vocab"))
-    parser.add_argument("--corpus", default="wikitext-103-raw-v1")
+    parser.add_argument("--corpus", default="data/corpus")
     parser.add_argument("--split", default="test")
     parser.add_argument("--trials", type=int, default=20_000)
     parser.add_argument("--seed", type=int, default=0)
