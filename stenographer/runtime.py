@@ -13,8 +13,8 @@ reaches the application through the same path and in the right order.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from stenographer.keyboard.composer import Backspaces, TextComposer, TypeText
 from stenographer.keyboard.detector import (

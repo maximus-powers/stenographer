@@ -16,10 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import torch
 
-from model import corpus, eval as harness, speed_model
+from model import corpus, speed_model
+from model import eval as harness
 from model.synth import SynthConfig
 from model.vocab import Vocab
-from stenographer.brain.predictor.base import Predictor
 from stenographer.brain.predictor.unigram import UnigramPredictor
 
 
@@ -65,7 +65,11 @@ def main() -> None:
         limit=args.trials,
         config=SynthConfig(),
     )
-    print(f"{len(trials):,} trials from {args.corpus}:{args.split}\n")
+    chordable = skipped["chorded"] / max(1, skipped["tokens seen"])
+    print(
+        f"{len(trials):,} trials from {args.corpus}:{args.split} "
+        f"({chordable:.1%} of tokens were chordable)\n"
+    )
 
     baseline = harness.score(
         UnigramPredictor(vocab), trials, name="baseline: frequency only, no context"

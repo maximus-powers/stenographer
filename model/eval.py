@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import random
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
 
 from model.corpus import Example
-from model.synth import SynthConfig, sample_chord, same_finger_pairs
+from model.synth import SynthConfig, same_finger_pairs, sample_chord
 from model.vocab import Vocab, distinct_letters
 from stenographer.brain.predictor.base import Predictor, Request
 

@@ -33,12 +33,21 @@ of briefing habits:
 
 | ranking | top-1 | top-3 | top-5 |
 |---|---|---|---|
-| frequency only, no context | 43.8% | 56.0% | 59.9% |
-| trained model, 256k examples seen | 60.3% | 71.6% | 75.7% |
+| frequency only, no context | 43.5% | 58.0% | 62.2% |
+| trained model, after 256k examples | 65.4% | 74.9% | 78.0% |
 
-Frequency alone splits sharply by how common the word is: 85% top-1 for the hundred most
-frequent words, 5% for those ranked one to ten thousand. Closing that gap is the model's
-entire job, and the first checkpoint already recovers a third of it.
+Both were scored on identical trials, so the gap is what context bought and nothing else.
+That model had seen 4% of a full training run; validation accuracy was still climbing
+steeply when it was measured (60.3% at 1,000 steps, 67.4% at 2,000).
+
+Frequency alone splits sharply by how common the word is: 80% top-1 for the hundred most
+frequent words, 4.5% for those ranked one to ten thousand. Closing that gap is the
+model's entire job, and after 4% of a training run it had taken the middle band from 4.5%
+to 28.6% and two-letter chords to 78.7%.
+
+At that accuracy the speed model already says chording wins for words of five letters or
+more, by 5.6% at five letters and 22.9% at seven, and loses on four-letter words. Which
+is the expected shape: short words are not worth chording.
 
 Chords are genuinely ambiguous. Over the 50,000-word vocabulary, the median 3-letter
 chord matches around 1,900 words and `{e,h,t}` alone matches "the", "they", "their",

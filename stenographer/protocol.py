@@ -18,6 +18,10 @@ slows typing down but never blocks it.
 from __future__ import annotations
 
 import json
+# MISSING is the only way to tell a field with no default from one defaulting to None,
+# which is what makes "this message is missing a field" distinguishable from "this field
+# is None".
+from dataclasses import MISSING as _MISSING
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
@@ -201,11 +205,6 @@ def decode(line: bytes | str) -> Message:
         if field_info.type == "tuple[str, ...]" and field_info.name in prepared:
             prepared[field_info.name] = tuple(prepared[field_info.name])
     return message_type(**prepared)
-
-
-# `dataclasses.MISSING` is private-ish but is the only way to tell a field with no default
-# from one defaulting to None.
-from dataclasses import MISSING as _MISSING  # noqa: E402
 
 
 @dataclass

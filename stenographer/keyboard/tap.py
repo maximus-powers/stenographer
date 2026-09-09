@@ -21,8 +21,8 @@ Three failure modes are handled explicitly because each one is silent otherwise:
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import Quartz
 from CoreFoundation import (

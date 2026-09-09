@@ -125,7 +125,7 @@ class BrainClient:
             try:
                 self.connection.settimeout(remaining)
                 chunk = self.connection.recv(4096)
-            except (socket.timeout, TimeoutError):
+            except TimeoutError:
                 break
             except OSError:
                 self._drop()

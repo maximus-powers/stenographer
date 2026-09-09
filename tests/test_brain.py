@@ -22,8 +22,8 @@ from stenographer.protocol import (
     CommitResult,
     ModeUpdate,
     Nav,
-    PredictRequest,
     Prediction,
+    PredictRequest,
     Typed,
 )
 

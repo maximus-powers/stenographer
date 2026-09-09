@@ -8,7 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from model import corpus, vocab as vocab_mod
+from model import corpus
+from model import vocab as vocab_mod
 
 
 def main() -> None:

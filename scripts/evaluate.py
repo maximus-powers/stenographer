@@ -13,7 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from model import ambiguity, corpus, eval as harness, speed_model
+from model import ambiguity, corpus, speed_model
+from model import eval as harness
 from model.candidates import CandidateIndex
 from model.synth import SynthConfig
 from model.vocab import Vocab

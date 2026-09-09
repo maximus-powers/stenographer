@@ -33,13 +33,13 @@ from stenographer.keyboard.detector import (
     Trigger,
 )
 from stenographer.keyboard.inject import Emitter
-from stenographer.keyboard.layout import RIGHT_OPTION, TAB, BACKSPACE
+from stenographer.keyboard.layout import BACKSPACE, RIGHT_OPTION, TAB
 from stenographer.keyboard.tap import (
     EventTap,
     accessibility_trusted,
     secure_input_enabled,
 )
-from stenographer.protocol import CommitResult, Nav, PredictRequest, Typed, socket_path
+from stenographer.protocol import Nav, PredictRequest, Typed, socket_path
 from stenographer.runtime import Runtime
 
 
@@ -103,10 +103,7 @@ def build(args) -> tuple[Runtime, EventTap, Emitter, Predictor, BrainClient | No
     )
     composer = TextComposer(ComposerConfig(auto_space=not args.no_auto_space))
 
-    typed_total = Counter()
-
     def on_text(text: str) -> None:
-        typed_total["characters"] += len(text)
         if client is not None:
             client.notify(Typed(text=text))
 

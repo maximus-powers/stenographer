@@ -6,8 +6,8 @@ from model.synth import (
     POLICIES,
     SynthConfig,
     is_typable,
-    sample_chord,
     same_finger_pairs,
+    sample_chord,
 )
 from model.vocab import distinct_letters
 

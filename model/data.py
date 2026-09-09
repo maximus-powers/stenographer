@@ -11,8 +11,8 @@ one, and no dataset needs materialising.
 from __future__ import annotations
 
 import random
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Iterator, Sequence
 
 import numpy as np
 import torch

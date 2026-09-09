@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from model.candidates import CandidateIndex
 from model.eval import Trial

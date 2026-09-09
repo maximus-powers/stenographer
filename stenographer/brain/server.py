@@ -26,14 +26,15 @@ from stenographer.protocol import (
     LineReader,
     ModeUpdate,
     Nav,
-    PredictRequest,
     Prediction,
+    PredictRequest,
     Typed,
     check_socket_path,
     encode,
     socket_path,
 )
-from stenographer.text.casing import CasingContext, apply as apply_casing
+from stenographer.text.casing import CasingContext
+from stenographer.text.casing import apply as apply_casing
 
 # How much text before the caret to keep. The model reads at most about 48 wordpieces,
 # so a few hundred characters is more than enough.
