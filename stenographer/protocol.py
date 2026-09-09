@@ -27,6 +27,11 @@ PROTOCOL_VERSION = 1
 DEFAULT_DEADLINE_MS = 50.0
 
 
+# A Unix socket path is limited to about this many bytes on macOS, and exceeding it fails
+# with a message that says nothing about which path was too long.
+MAX_SOCKET_PATH = 100
+
+
 def socket_path() -> Path:
     return (
         Path.home()
@@ -35,6 +40,21 @@ def socket_path() -> Path:
         / "stenographer"
         / "stenod.sock"
     )
+
+
+def check_socket_path(path: Path) -> None:
+    """Reject a socket path the operating system cannot use.
+
+    Worth checking explicitly: binding a long path fails with "AF_UNIX path too long",
+    which does not name the path, and temporary directories on macOS are long enough to
+    run into this.
+    """
+    length = len(str(path).encode("utf-8"))
+    if length > MAX_SOCKET_PATH:
+        raise ValueError(
+            f"socket path is {length} bytes, over the {MAX_SOCKET_PATH}-byte limit for a "
+            f"Unix socket: {path}. Choose a shorter path, such as one under /tmp."
+        )
 
 
 class Message:
