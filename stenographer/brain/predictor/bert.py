@@ -53,10 +53,15 @@ class BertPredictor:
         encoder: Encoder,
         device: torch.device | None = None,
     ) -> None:
+        from model.train import pick_device
+
         self.vocab = vocab
         self.encoder = encoder
         self.index = CandidateIndex(vocab)
-        self.device = device or torch.device("cpu")
+        # Default to the fastest device available rather than the CPU. Getting this wrong
+        # is quiet and expensive: a forward pass costs about 34 ms on the CPU here against
+        # a 50 ms deadline, so it works and merely wastes most of the budget.
+        self.device = device or pick_device()
         self.model = model.to(self.device).eval()
         self.last_timing = Timing()
 

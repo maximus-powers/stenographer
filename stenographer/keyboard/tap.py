@@ -29,9 +29,10 @@ from CoreFoundation import (
     CFMachPortCreateRunLoopSource,
     CFRunLoopAddSource,
     CFRunLoopGetCurrent,
-    CFRunLoopRun,
+    CFRunLoopRunInMode,
     CFRunLoopStop,
     kCFRunLoopCommonModes,
+    kCFRunLoopDefaultMode,
 )
 
 from stenographer.keyboard.events import KeyEvent, Kind
@@ -153,7 +154,19 @@ class EventTap:
             )
 
     def run(self) -> None:
-        """Install the tap and process events until `stop` is called."""
+        """Install the tap and process events until stopped.
+
+        The run loop is pumped in short slices rather than entered with `CFRunLoopRun`,
+        which would block inside C indefinitely. Python only runs a signal handler between
+        its own bytecodes, so with a blocking call there Ctrl-C does nothing and the
+        process has to be killed outright. For something sitting between the user and
+        their keyboard, being able to stop it is not negotiable.
+
+        Returning to Python each slice also drives the detector's clock: it decides a group
+        by timing as much as by keys, so something has to wake it when nothing is pressed.
+        This happens on the same thread as the callback, so the two can never race over
+        the detector's state.
+        """
         if self.tap is None:
             self.create()
         source = CFMachPortCreateRunLoopSource(None, self.tap, 0)
@@ -161,9 +174,16 @@ class EventTap:
         Quartz.CGEventTapEnable(self.tap, True)
         self.running = True
         self._loop = CFRunLoopGetCurrent()
-        if self.on_timer is not None or self.health_interval:
-            self._install_timer()
-        CFRunLoopRun()
+
+        try:
+            while self.running:
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, self.timer_interval, False)
+                if self.on_timer is not None:
+                    self.on_timer(time.monotonic() * 1000.0)
+                self._check_health()
+        finally:
+            if self.tap is not None:
+                Quartz.CGEventTapEnable(self.tap, False)
 
     def stop(self) -> None:
         self.running = False
@@ -172,37 +192,6 @@ class EventTap:
         loop = getattr(self, "_loop", None)
         if loop is not None:
             CFRunLoopStop(loop)
-
-    def _install_timer(self) -> None:
-        """A repeating run-loop timer, which is how held-back keys get released on time.
-
-        The detector decides a group by the clock as much as by the keys, so something has
-        to wake it when no key is pressed. This runs on the same thread as the callback,
-        so the two can never race over the detector's state.
-        """
-        from CoreFoundation import (
-            CFAbsoluteTimeGetCurrent,
-            CFRunLoopAddTimer,
-            CFRunLoopTimerCreate,
-        )
-
-        def fire(_timer, _info) -> None:
-            now = time.monotonic() * 1000.0
-            if self.on_timer is not None:
-                self.on_timer(now)
-            self._check_health()
-
-        timer = CFRunLoopTimerCreate(
-            None,
-            CFAbsoluteTimeGetCurrent() + self.timer_interval,
-            self.timer_interval,
-            0,
-            0,
-            fire,
-            None,
-        )
-        CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopCommonModes)
-        self._timer = timer
 
     # -- health ---------------------------------------------------------------
 

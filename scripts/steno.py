@@ -14,6 +14,7 @@ Needs Accessibility permission, which fails silently when missing. Run
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 import time
 from collections import Counter
@@ -168,6 +169,13 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
+    # Line-buffer output: this process spends its life inside a run loop, and a banner or
+    # a dry-run decision held in a pipe buffer is of no use to anyone watching.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
+        pass
+
     if not args.dry_run and not accessibility_trusted():
         print("Accessibility permission is not granted, so nothing would be captured.")
         print("Run: python scripts/check_permissions.py")
@@ -183,6 +191,18 @@ def main() -> None:
     if secure_input_enabled():
         print("  note          Secure Input is on; no keystrokes will be seen")
     print("  Ctrl-C to stop\n")
+
+    # Ask the run loop to finish rather than relying on the default signal behaviour.
+    # Ctrl-C raising KeyboardInterrupt is not something to depend on here: this process
+    # spends its life inside a run loop, and a background process started by a
+    # non-interactive shell inherits SIGINT ignored altogether. Since this one sits
+    # between the user and their keyboard, stopping it has to work every time.
+    def shutdown(signum, _frame) -> None:
+        print(f"\n  stopping on {signal.Signals(signum).name}")
+        tap.running = False
+
+    for received in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(received, shutdown)
 
     started = time.monotonic()
     try:
