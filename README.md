@@ -1,17 +1,24 @@
 # stenographer
 
-Type a word by pressing several of its letters at once, like a stenographer, and let a
+Type a word by pressing its opening letters at once, like a stenographer, and let a
 model work out which word you meant from those letters and the sentence so far.
 
-Press `t`, `h` and `e` together and you get "the ", space included. Press `b`, `c` and
-`s` together and you get "because ". Wrong word? Press the same chord again and it steps
-to the next candidate, so `{e,h,t}` twice gives "they" and a third time "their". Press
-one letter at a time and nothing changes: single presses are passed straight through, so
+**A chord is the word's first letters, in any order.** Press `t`, `h` and `e` together
+and you get "the ", space included. Press `b`, `e` and `c` and you get "because ", the
+first three letters of it. Four keys means the first four: `{b,e,c,a}` is still because,
+and `{t,o,m,r}` is tomorrow. Wrong word? Press the same chord again and it steps to the
+next candidate, so `{e,h,t}` twice gives "they" and a third time "their". Press one
+letter at a time and nothing changes: single presses are passed straight through, so
 ordinary typing always works.
 
-You have half a second to form a chord, measured from the first key going down to the
-last one coming up. There is no need to hit the keys at the same instant, only to have
-them all down together at some point before you lift your fingers.
+There is nothing to memorise, and nothing to learn per word: the chord for a word is the
+start of the word. A doubled letter costs no key, since a hand cannot press it twice at
+once, so the first four of "little" are l, i, t, e.
+
+You have 300 ms to form a chord, measured from the first key going down to the last one
+coming up, which leaves about 220 ms for your fingers to arrive. There is no need to hit
+the keys at the same instant, only to have them all down together at some point before
+you lift.
 
 ## Does it actually save time?
 
@@ -25,6 +32,12 @@ are and how well they can be resolved, and `model/speed_model.py` turns that int
 verdict. With a 200 ms keystroke (about 60 words per minute) and a 600 ms chord, a
 six-letter word needs roughly 68% top-1 accuracy before chording wins at all.
 
+That 600 ms is an assumption, and it is now in open conflict with the 300 ms the detector
+allows: a gesture the speed model treats as normal would not be recognised as a chord at
+all. One of the two numbers is wrong, and `scripts/chord_drill.py` is what settles it,
+because it measures how long a hand actually takes. Until it has been run, treat the
+window as the claim under test.
+
 Two measurements decide it, and neither is a guess:
 
 | | how to get it | status |
@@ -34,31 +47,35 @@ Two measurements decide it, and neither is a guess:
 
 ### What the numbers say so far
 
-Over 20,000 prediction sites from held-out WikiText-103, with chords drawn from a mixture
-of briefing habits:
+Over 20,000 prediction sites from held-out WikiText-103, chording each word by its
+opening letters:
 
 | ranking | top-1 | top-3 | top-5 |
 |---|---|---|---|
-| frequency only, no context | 43.5% | 58.0% | 62.2% |
-| trained model, after 256k examples | 65.4% | 74.9% | 78.0% |
+| frequency only, no context | 63.5% | 78.9% | 84.9% |
+| trained model | being retrained | | |
 
-Both were scored on identical trials, so the gap is what context bought and nothing else.
-That model had seen 4% of a full training run; validation accuracy was still climbing
-steeply when it was measured (60.3% at 1,000 steps, 67.4% at 2,000).
+The frequency number is what the system scores with no model at all, and most of it is
+the candidate rule rather than the ranker: matching any word that merely contained the
+chord letters scored 43.5% on the same trials. Restricting a chord to a word's opening
+letters is worth twenty points before a model is consulted.
 
-Frequency alone splits sharply by how common the word is: 80% top-1 for the hundred most
-frequent words, 4.5% for those ranked one to ten thousand. Closing that gap is the
-model's entire job, and after 4% of a training run it had taken the middle band from 4.5%
-to 28.6% and two-letter chords to 78.7%.
+An earlier model reached 81.7% top-1 after 25,000 steps, but it was trained when 65% of
+its examples were briefs this no longer accepts, and scored against a candidate set about
+twenty times larger. Neither number carries over, so the row above waits for the retrain.
+Its shape is still worth knowing: validation accuracy was climbing when that run ended
+(81.0% at 21,000 steps, 81.7% at 25,000), so the ceiling was not reached.
 
-At that accuracy the speed model already says chording wins for words of five letters or
-more, by 5.6% at five letters and 22.9% at seven, and loses on four-letter words. Which
-is the expected shape: short words are not worth chording.
+Frequency alone splits sharply by how common the word is, and closing that gap is the
+model's entire job.
 
-Chords are genuinely ambiguous. Over the 50,000-word vocabulary, the median 3-letter
-chord matches around 1,900 words and `{e,h,t}` alone matches "the", "they", "their",
-"there", "them" and "other". That is why ranking scores every candidate in one pass
-rather than scoring them one at a time, and why context matters more than chord length.
+Chords are still ambiguous, just far less so. Over the 50,000-word vocabulary the median
+3-key chord opens 9 words and the median 4-key chord opens 5, against roughly 1,900 and
+600 when a chord meant any word containing those letters. `{e,h,t}` gives "the", "they",
+"their", "there", "them", "then", "these" - but no longer "other", which contains all
+three and opens with none of them. That is why ranking scores every candidate in one pass
+rather than scoring them one at a time, and why context still matters more than chord
+length: the words a chord opens are exactly the words that look alike at the start.
 
 ## Getting started
 

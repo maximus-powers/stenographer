@@ -153,10 +153,10 @@ def main() -> None:
     parser.add_argument("--no-daemon", action="store_true", help="frequency index only")
     parser.add_argument("--deadline", type=float, default=50.0, help="ms to wait for the daemon")
     parser.add_argument(
-        "--chord-max", type=float, default=500.0, help="ms a whole chord gesture may take"
+        "--chord-max", type=float, default=300.0, help="ms a whole chord gesture may take"
     )
     parser.add_argument(
-        "--lone-hold", type=float, default=500.0, help="ms to hold a single key back"
+        "--lone-hold", type=float, default=300.0, help="ms to hold a single key back"
     )
     parser.add_argument("--overlap", type=float, default=60.0, help="ms of overlap a pair needs")
     parser.add_argument("--min-keys", type=int, default=2)

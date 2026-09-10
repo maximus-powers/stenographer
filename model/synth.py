@@ -1,21 +1,25 @@
 """Synthetic chord generation.
 
 The model never sees the user's own typing, so its training signal comes entirely from
-chords synthesised over a public corpus. The sampling policy therefore has to cover the
-range of ways a person might brief a word rather than one canonical scheme: no usage log
-exists to learn the user's habit from, so the mixture has to generalise.
+chords synthesised over a public corpus. What that signal has to look like is decided by
+candidate generation, not by guesswork about habits: a chord is a word's first k distinct
+letters, so `prefix` is the only policy that produces a chord the deployed system can
+resolve, and it carries all the weight.
 
-Every generated chord is a subset of the target word's distinct letters, which keeps it
-consistent with the superset test used for candidate generation.
+The other three policies are kept because the evaluation harness reports accuracy per
+policy, and a number for the briefs this no longer accepts is worth having when the
+question of widening the window comes back. They are not sampled during training. An
+earlier mixture spent 65% of its examples on them, which taught the model to rank words
+against a candidate set that no longer exists.
 
 Substitution noise, which models a finger landing one key off, is available but off by
 default, and the reason is worth recording. Candidate generation keeps a word only when
-it contains every chord letter, so a chord carrying a letter the target lacks excludes
-that target outright. The model's output is masked to the candidate set, so it could
+the chord is exactly its opening letters, so a chord carrying a letter the target does
+not open with excludes that target outright. The model's output is masked to the candidate set, so it could
 never name the intended word however well it was trained; training on such examples only
-teaches it to back wrong words. Relaxed matching does not rescue them either, because a
-noisy chord normally still matches plenty of other words and so never triggers the
-relaxed path. A slipped finger is therefore handled where it belongs, in the cycle and
+teaches it to back wrong words. Relaxed matching does not rescue them either: it fires
+only when nothing matched at all, and answers with what a smaller chord would have
+opened, which is not the intended word. A slipped finger is therefore handled where it belongs, in the cycle and
 undo keys, rather than pretended away in the training distribution.
 """
 
@@ -55,7 +59,7 @@ NEIGHBOURS: dict[str, str] = {
 }
 
 SIZE_WEIGHTS = {2: 0.10, 3: 0.40, 4: 0.35, 5: 0.15}
-POLICY_WEIGHTS = {"prefix": 0.35, "skeleton": 0.35, "outer": 0.15, "random": 0.15}
+POLICY_WEIGHTS = {"prefix": 1.0}
 
 
 @dataclass
