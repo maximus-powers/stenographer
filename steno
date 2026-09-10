@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# Start stenographer with one command.
+#
+#   ./steno              type for real, everywhere
+#   ./steno --dry-run    watch and print what it would have typed, change nothing
+#   ./steno --stop       stop a daemon left running in the background
+#
+# There are two processes because a tap that stalls freezes the keyboard for every
+# application on the machine, so the model is not allowed to share with it. That is a
+# fact about the design, not something a user should have to arrange, so this starts
+# the daemon if it is not already up, waits for the model to load, and runs the tap in
+# front. Ctrl-C stops both. A daemon that was already running is left alone.
+#
+# Anything this does not recognise is passed to scripts/steno.py, so --chord-max,
+# --trigger, --verbose and the rest work here too. --cpu and --no-model go to the daemon.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+PY=.venv/bin/python
+
+if [ ! -x "$PY" ]; then
+  echo "No .venv here. Create it with:" >&2
+  echo "  python3.14 -m venv .venv && .venv/bin/pip install -e '.[ml,mac,dev]'" >&2
+  exit 1
+fi
+
+STOP=0
+DAEMON_ARGS=()
+TAP_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --stop) STOP=1 ;;
+    --cpu|--no-model) DAEMON_ARGS+=("$arg") ;;
+    *) TAP_ARGS+=("$arg") ;;
+  esac
+done
+
+# Is a daemon listening? A socket file can outlive the process that made it, so this
+# connects rather than trusting the path to exist.
+daemon_up() {
+  "$PY" - <<'PROBE' >/dev/null 2>&1
+import socket, sys
+sys.path.insert(0, ".")
+from stenographer.protocol import socket_path
+connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+connection.settimeout(1.0)
+try:
+    connection.connect(str(socket_path()))
+finally:
+    connection.close()
+PROBE
+}
+
+# Every daemon process, and nothing else. A -f match on its own is not safe enough:
+# any shell or editor whose command line happens to mention the script matches it too,
+# and killing the caller's own shell is a poor way to stop a daemon. So each candidate
+# has to actually be a python process, and this process and its parent never count.
+daemon_pids() {
+  local pid comm
+  for pid in $(pgrep -f "scripts/stenod\.py" 2>/dev/null || true); do
+    if [ "$pid" = "$$" ] || [ "$pid" = "$PPID" ]; then continue; fi
+    comm=$(ps -o comm= -p "$pid" 2>/dev/null || true)
+    case "$comm" in *python*) printf '%s\n' "$pid" ;; esac
+  done
+}
+
+if [ "$STOP" = 1 ]; then
+  pids=$(daemon_pids)
+  if [ -n "$pids" ]; then
+    # shellcheck disable=SC2086
+    kill $pids && echo "daemon stopped"
+  else
+    echo "no daemon running"
+  fi
+  exit 0
+fi
+
+# Without Accessibility permission nothing is captured and nothing says so: the tap is
+# created, reports itself enabled, and receives no events. Check before starting a model.
+if ! "$PY" -c 'import sys; sys.path.insert(0, "."); from stenographer.keyboard.tap import accessibility_trusted; raise SystemExit(0 if accessibility_trusted() else 1)'; then
+  echo
+  echo "Accessibility permission is not granted, so no keystroke would ever arrive."
+  echo "Add THIS TERMINAL APPLICATION in the pane that is about to open - not Python;"
+  echo "the permission belongs to whatever macOS holds responsible, and child processes"
+  echo "inherit it. Then quit the terminal, reopen it, and run ./steno again."
+  echo
+  "$PY" scripts/check_permissions.py --prompt || true
+  exit 1
+fi
+
+STARTED=0
+DAEMON_PID=
+if daemon_up; then
+  echo "daemon already running"
+else
+  mkdir -p runs
+  touch runs/stenod.log
+  # Where this run's output starts, so a failure report shows this run and not the
+  # successful one before it.
+  log_from=$(( $(wc -l < runs/stenod.log) + 1 ))
+  printf '\n--- %s ---\n' "$(date '+%Y-%m-%d %H:%M:%S')" >>runs/stenod.log
+  nohup "$PY" scripts/stenod.py ${DAEMON_ARGS[@]+"${DAEMON_ARGS[@]}"} >>runs/stenod.log 2>&1 &
+  DAEMON_PID=$!
+  STARTED=1
+  printf "loading the model "
+  ready=0
+  for _ in $(seq 1 180); do
+    if daemon_up; then ready=1; break; fi
+    if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+      echo
+      echo "The daemon exited while loading. What it said:" >&2
+      tail -n "+$log_from" runs/stenod.log >&2
+      exit 1
+    fi
+    printf .
+    sleep 1
+  done
+  echo
+  if [ "$ready" = 0 ]; then
+    echo "The daemon did not start listening within three minutes; see runs/stenod.log" >&2
+    exit 1
+  fi
+fi
+
+# Ctrl-C reaches both, since the daemon shares this process group, and stenod unlinks its
+# own socket on the way out. This is for every other way out of the tap.
+cleanup() {
+  if [ "$STARTED" = 1 ] && [ -n "$DAEMON_PID" ]; then
+    kill "$DAEMON_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+"$PY" scripts/steno.py ${TAP_ARGS[@]+"${TAP_ARGS[@]}"}

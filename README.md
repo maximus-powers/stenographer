@@ -89,18 +89,32 @@ baseline on identical trials, so the difference is what context bought and nothi
 
 ### Running it for real
 
-Two processes. The daemon holds the model; the tap watches the keyboard.
-
 ```bash
-.venv/bin/python scripts/check_permissions.py             # do this first
-.venv/bin/python scripts/stenod.py --checkpoint runs/mine/checkpoint.pt
-.venv/bin/python scripts/steno.py --dry-run               # watch, change nothing
-.venv/bin/python scripts/steno.py                         # for real
+./steno --dry-run    # watch and print what it would have typed, change nothing
+./steno              # for real, in every application
+./steno --stop       # stop a daemon left running in the background
 ```
 
 **Start with `--dry-run`.** It watches without touching anything and prints what it would
 have done. It is the only safe way to find out whether the timing thresholds suit your
 hands before letting it rewrite what you type.
+
+Once it is running it is running everywhere: an event tap sees the keyboard for the whole
+login session, not one application. Ctrl-C stops it.
+
+`./steno` checks Accessibility permission before it loads anything, starts the prediction
+daemon if one is not already up, waits for the model, and runs the tap in front. Flags it
+does not recognise go to the tap, so `./steno --dry-run --chord-max 700` works; `--cpu`
+and `--no-model` go to the daemon. The daemon's own output goes to `runs/stenod.log`.
+
+There are two processes because a tap that stalls freezes the keyboard for every
+application on the machine, so the model may not share with it. To run them by hand:
+
+```bash
+.venv/bin/python scripts/check_permissions.py             # do this first
+.venv/bin/python scripts/stenod.py --checkpoint runs/mine/checkpoint.pt
+.venv/bin/python scripts/steno.py --dry-run
+```
 
 ## Permissions
 
@@ -197,6 +211,7 @@ visible way this can look broken.
 | `stenographer/text/` | casing rules |
 | `stenographer/runtime.py` | the keystroke path, from key event to injected text |
 | `stenographer/protocol.py` | the messages between the two processes |
+| `steno` | one command: permission check, daemon, tap |
 | `scripts/` | everything runnable |
 | `tests/` | 428 tests, none of which need macOS |
 
