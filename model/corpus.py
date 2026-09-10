@@ -7,10 +7,11 @@ corpora are used; nothing the user types is ever read or stored.
 
 from __future__ import annotations
 
+import random
 import re
 from collections import Counter
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from model.vocab import normalise
@@ -103,6 +104,35 @@ def iter_examples(
                 right=tokens[position + 1 : position + 1 + right_window],
                 sentence_start=previous is None or previous in SENTENCE_END,
             )
+
+
+def trim_to_runtime_context(example: Example, rng: random.Random, probability: float) -> Example:
+    """Sometimes cut the left context down to a length the daemon could really have.
+
+    A corpus example always arrives with its full window of preceding words. The running
+    daemon rarely has one: it knows only what the tap has reported since it started, so
+    the first prediction of a session has no context at all, the second has one word, and
+    a click anywhere clears it back to nothing. Training every example on 48 words of
+    history teaches the model to lean on something that is missing exactly when it is
+    most needed.
+
+    So a share of examples are cut to a uniformly random number of their trailing words.
+    An example cut to nothing is also marked as starting a sentence, because that is what
+    the daemon will say about an empty context, and the two have to agree.
+
+    `probability` is a hedge rather than a measurement. The honest way to set it is to
+    record how much context real sessions actually have during a dry run and match that
+    distribution; until then it says "often enough that short context is not exotic".
+    """
+    if probability <= 0 or not example.left or rng.random() >= probability:
+        return example
+    keep = rng.randint(0, len(example.left))
+    return replace(
+        example,
+        # keep == 0 has to slice from the end, since left[-0:] is the whole list.
+        left=example.left[len(example.left) - keep :],
+        sentence_start=True if keep == 0 else example.sentence_start,
+    )
 
 
 def count_words(lines: Iterable[str]) -> tuple[Counter[str], Counter[str]]:

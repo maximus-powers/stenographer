@@ -18,7 +18,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from model.corpus import Example, iter_examples, iter_lines
+from model.corpus import Example, iter_examples, iter_lines, trim_to_runtime_context
 from model.net import ModelConfig
 from model.synth import SynthConfig, sample_chord
 from model.vocab import Vocab, distinct_letters
@@ -210,6 +210,9 @@ class ExampleStream:
                     continue
                 chord, _ = drawn
                 include_right = self.rng.random() < self.encoder.config.right_context_prob
+                example = trim_to_runtime_context(
+                    example, self.rng, self.encoder.config.short_context_prob
+                )
                 ids, types, position = self.encoder.encode(
                     example, chord, include_right=include_right
                 )

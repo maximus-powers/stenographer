@@ -31,10 +31,16 @@ class ModelConfig:
     max_length: int = 80
     left_window: int = 48
     right_window: int = 16
-    # Probability that a training example carries any following text. Most of the time a
-    # typist is at the end of what they have written, so right context is usually absent
-    # and the model must not come to depend on it.
-    right_context_prob: float = 0.25
+    # Probability that a training example carries any following text. Zero, because the
+    # daemon never has any: it is built from what the tap reported typing, which is text
+    # behind the caret, and reading ahead would need the Accessibility API work that is
+    # not built. A quarter of examples used to carry right context the deployed model
+    # could never be given. Raise this only if something starts supplying it.
+    right_context_prob: float = 0.0
+    # Probability that an example has its left context cut to a random shorter length,
+    # matching a daemon that has only seen part of a session. See
+    # `model.corpus.trim_to_runtime_context`.
+    short_context_prob: float = 0.35
     dropout: float = 0.1
 
 
