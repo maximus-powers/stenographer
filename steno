@@ -12,7 +12,8 @@
 # front. Ctrl-C stops both. A daemon that was already running is left alone.
 #
 # Anything this does not recognise is passed to scripts/steno.py, so --chord-max,
-# --trigger, --verbose and the rest work here too. --cpu and --no-model go to the daemon.
+# --trigger, --verbose and the rest work here too. --checkpoint, --cpu and --no-model go
+# to the daemon, which is the process that holds the model.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -27,12 +28,22 @@ fi
 STOP=0
 DAEMON_ARGS=()
 TAP_ARGS=()
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --stop) STOP=1 ;;
-    --cpu|--no-model) DAEMON_ARGS+=("$arg") ;;
-    *) TAP_ARGS+=("$arg") ;;
+    --cpu|--no-model) DAEMON_ARGS+=("$1") ;;
+    # Takes a value, and only the daemon knows what to do with it.
+    --checkpoint|--checkpoint=*)
+      if [ "$1" = "--checkpoint" ]; then
+        if [ $# -lt 2 ]; then echo "--checkpoint needs a path" >&2; exit 1; fi
+        DAEMON_ARGS+=("$1" "$2"); shift
+      else
+        DAEMON_ARGS+=("$1")
+      fi
+      ;;
+    *) TAP_ARGS+=("$1") ;;
   esac
+  shift
 done
 
 # Is a daemon listening? A socket file can outlive the process that made it, so this
