@@ -5,7 +5,7 @@ keystrokes, so "two keys were down at once" is nowhere near enough evidence on i
 Too loose a test and ordinary typing produces spurious words; too tight and deliberate
 chords are missed.
 
-The way out is to stop relying on speed. A chord gets a full second to be formed, and
+The way out is to stop relying on speed. A chord gets half a second to be formed, and
 what marks it out instead is that every one of its keys was down at the same moment. A
 typist releases each key about as the next goes down, so ordinary typing never gets three
 keys down together however fast it goes, while a deliberate press can be made as slowly
@@ -44,9 +44,11 @@ class Trigger(Enum):
 @dataclass(frozen=True)
 class DetectorConfig:
     # How long a whole chord gesture may take, from the first key going down to the last
-    # coming up. A second is a comfortable amount of time to place three or four fingers
-    # deliberately, and it is far longer than any single keystroke in ordinary typing.
-    chord_max_ms: float = 1000.0
+    # coming up. Half a second is enough to place three or four fingers deliberately and
+    # still far longer than any single keystroke in ordinary typing. The window is not
+    # what keeps ordinary typing out - the simultaneity rule below is - so it is set to
+    # what a hand needs rather than to the widest value that would still be safe.
+    chord_max_ms: float = 500.0
     # A lone key that is still down after this long is sent on its own. Until then it is
     # held back, because another finger may still be coming to join it, and cutting this
     # short would break up a slowly formed chord.
@@ -57,7 +59,7 @@ class DetectorConfig:
     # where the first character waits this long. Prose rarely does that, and the places
     # that do, terminals and editors, are on the deny-list anyway. Lower it if key repeat
     # matters more than a leisurely chord.
-    lone_hold_ms: float = 1000.0
+    lone_hold_ms: float = 500.0
     # A two-key group needs this much simultaneous hold, measured from the second key
     # going down to the first coming up. Two keys overlapping is the single weakest
     # signal there is, because that is exactly what fast typing looks like, so a pair has
@@ -259,7 +261,7 @@ class ChordDetector:
             return self._resolve(event.t_ms) + self._open_group(event)
 
         # A key joins only while every key already in the group is still down. That single
-        # rule is what lets the gesture take as long as a second without swallowing
+        # rule is what lets the gesture take as long as it needs without swallowing
         # ordinary typing: a typist releases each key around the time the next goes down,
         # so the moment anything has been let go the group is closed and a new one starts.
         # It also means the keys of a chord were necessarily all down at one instant.

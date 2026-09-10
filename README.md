@@ -9,8 +9,9 @@ to the next candidate, so `{e,h,t}` twice gives "they" and a third time "their".
 one letter at a time and nothing changes: single presses are passed straight through, so
 ordinary typing always works.
 
-You have a full second to form a chord. There is no need to hit the keys at the same
-instant, only to have them all down together at some point before you lift your fingers.
+You have half a second to form a chord, measured from the first key going down to the
+last one coming up. There is no need to hit the keys at the same instant, only to have
+them all down together at some point before you lift your fingers.
 
 ## Does it actually save time?
 
@@ -148,18 +149,22 @@ was asked about and discarded if it belongs to a request already given up on, so
 answer can never be attributed to the wrong chord.
 
 **Telling a chord from fast typing** is the hard part, and the answer is not to measure
-speed. A chord gets a full second, and what marks it out instead is that every one of its
+speed. A chord gets half a second, and what marks it out instead is that every one of its
 keys was down at the same moment. A typist releases each key about as the next goes down,
 so ordinary typing never gets three keys down together however fast it goes, while a
-deliberate press can be made as slowly as the hand likes. Keys still down when the second
+deliberate press can be made as slowly as the hand likes. Keys still down when the window
 runs out are fingers resting on the keyboard, not a chord.
+
+The window is not what keeps ordinary typing out, which is why it can be set to what a
+hand needs rather than to the widest value that stays safe. It has to cover the whole
+gesture including the release, so half a second means fingers arriving over about 420 ms.
 
 Two keys are the weak case, because a pair overlapping is exactly what rollover looks
 like, so a pair also has to be held together for 60 ms to count. All three numbers are
 flags: `--chord-max`, `--lone-hold`, `--overlap`.
 
 Waiting for your fingers to lift costs ordinary typing nothing, which is easy to get
-wrong. A single keystroke is decided the moment it is released, not when the second
+wrong. A single keystroke is decided the moment it is released, not when the window
 expires, so the letter appears as the finger comes up. What it does affect is holding a
 letter key down to repeat it, where the first character waits out `--lone-hold`.
 

@@ -151,9 +151,9 @@ def test_a_released_key_is_emitted_at_once_not_after_the_hold_limit():
     """Normal typing must not wait for the chord budget to expire.
 
     A keystroke is decided when it is released, so the letter appears as the finger
-    lifts. Getting this wrong would put a second of latency on every character.
+    lifts. Getting this wrong would put the whole hold on every character.
     """
-    detector = ChordDetector(DetectorConfig(lone_hold_ms=1000.0))
+    detector = ChordDetector(DetectorConfig(lone_hold_ms=500.0))
     actions = []
     for event in [down("a", 0), up("a", 70)]:
         actions.extend(detector.feed(event))
@@ -223,11 +223,11 @@ def test_a_second_press_after_the_window_starts_a_new_group():
 # -- a chord may be formed slowly -----------------------------------------------
 
 
-@pytest.mark.parametrize("spread", [20, 150, 400, 700, 900])
+@pytest.mark.parametrize("spread", [20, 100, 250, 380, 420])
 def test_a_chord_can_be_formed_slowly(spread):
-    """Fingers may arrive over most of a second, so long as none has left yet.
+    """Fingers may arrive over most of the window, so long as none has left yet.
 
-    This is what the one-second budget is for: there is no need to hit the keys at the
+    This is what the half-second budget is for: there is no need to hit the keys at the
     same instant, only to have them all down together at some point before lifting.
     """
     detector = ChordDetector()
@@ -238,18 +238,18 @@ def test_a_chord_can_be_formed_slowly(spread):
 
 
 def test_a_gesture_slower_than_the_limit_is_not_a_chord():
-    detector = ChordDetector(DetectorConfig(chord_max_ms=1000.0))
-    events = [down("t", 0), down("h", 400), down("e", 1400)]
-    events += [up(k, 1500 + i * 10) for i, k in enumerate("the")]
+    detector = ChordDetector(DetectorConfig(chord_max_ms=500.0))
+    events = [down("t", 0), down("h", 200), down("e", 700)]
+    events += [up(k, 800 + i * 10) for i, k in enumerate("the")]
     actions = run(detector, events)
     # "t" and "h" overlapped long enough to be a pair; "e" arrived too late to join them.
     assert "eht" not in chords(actions)
 
 
 def test_keys_still_down_when_the_time_runs_out_are_typed_as_letters():
-    detector = ChordDetector(DetectorConfig(chord_max_ms=1000.0))
+    detector = ChordDetector(DetectorConfig(chord_max_ms=500.0))
     actions = run(detector, [down("t", 0), down("h", 20), down("e", 40)], settle=False)
-    actions.extend(detector.on_timer(1200))
+    actions.extend(detector.on_timer(600))
     assert chords(actions) == []
     assert typed(actions) == "the"
 
@@ -289,6 +289,18 @@ def test_a_whole_word_typed_with_heavy_rollover_produces_no_chord():
     actions = run(detector, events)
     assert chords(actions) == []
     assert typed(actions) == "keyboard"
+
+
+def test_the_shipped_window_is_half_a_second():
+    """The documented number and the default must not drift apart.
+
+    Every timing in this file is written out against these, and the README quotes them
+    to the user, so a change here should be a change someone made on purpose.
+    """
+    config = DetectorConfig()
+    assert config.chord_max_ms == 500.0
+    assert config.lone_hold_ms == 500.0
+    assert config.two_key_overlap_ms == 60.0
 
 
 def test_the_time_limit_is_configurable():
@@ -393,9 +405,9 @@ def test_flags_changed_events_pass_through():
 
 def test_keys_still_held_after_the_maximum_are_not_a_chord():
     """Fingers resting on the keyboard must not produce a word."""
-    detector = ChordDetector(DetectorConfig(chord_max_ms=1000.0))
+    detector = ChordDetector(DetectorConfig(chord_max_ms=500.0))
     actions = run(detector, [down("a", 0), down("s", 20), down("d", 40)], settle=False)
-    actions.extend(detector.on_timer(1100))
+    actions.extend(detector.on_timer(600))
     assert chords(actions) == []
     assert typed(actions) == "asd"
 
