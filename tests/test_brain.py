@@ -125,6 +125,36 @@ def test_typed_text_reaches_the_predictor_as_context():
     assert predictor.seen[-1].left == ("I", "went")
 
 
+def test_the_model_is_told_when_a_word_starts_a_sentence():
+    """The casing rules work this out; the model was never given the answer.
+
+    Every request said mid-sentence, including the first word of a session, where the
+    model is at its least certain and the signal is most obviously available.
+    """
+    predictor = StubPredictor()
+    brain = Brain(predictor=predictor)
+    # Nothing typed yet: whatever comes next opens the sentence.
+    brain.handle(PredictRequest(chord_id=1, letters="eht"))
+    assert predictor.seen[-1].sentence_start is True
+
+    brain.handle(Typed(text="I went "))
+    brain.handle(PredictRequest(chord_id=2, letters="eht"))
+    assert predictor.seen[-1].sentence_start is False
+
+    brain.handle(Typed(text="home. "))
+    brain.handle(PredictRequest(chord_id=3, letters="eht"))
+    assert predictor.seen[-1].sentence_start is True
+
+
+def test_an_unknown_context_claims_nothing_about_sentence_position():
+    """After the caret may have moved, the text held is not evidence of anything."""
+    predictor = StubPredictor()
+    brain = Brain(predictor=predictor)
+    brain.handle(Nav(kind_name="click"))
+    brain.handle(PredictRequest(chord_id=1, letters="eht"))
+    assert predictor.seen[-1].sentence_start is False
+
+
 def test_navigation_clears_the_context():
     predictor = StubPredictor()
     brain = Brain(predictor=predictor)

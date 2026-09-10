@@ -33,7 +33,7 @@ from stenographer.protocol import (
     encode,
     socket_path,
 )
-from stenographer.text.casing import CasingContext
+from stenographer.text.casing import CasingContext, starts_sentence
 from stenographer.text.casing import apply as apply_casing
 
 # How much text before the caret to keep. The model reads at most about 48 wordpieces,
@@ -116,7 +116,10 @@ class Brain:
                 letters=request.letters,
                 press_order=request.press_order,
                 left=tuple(self.context.words()),
-                sentence_start=False,
+                # The casing rules already work this out from the same text; the model
+                # was being told "mid-sentence" at every sentence start, including the
+                # first word of a session, where the answer is most obviously yes.
+                sentence_start=starts_sentence(self.context.text) if self.context.known else False,
                 shift=request.shift,
                 caps_lock=request.caps_lock,
             ),
