@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Retrain the chord model on opening-letter chords.
+#
+#   ./retrain            smoke test, then the full run in the background
+#   ./retrain --smoke    smoke test only, nothing launched
+#   STEPS=25000 ./retrain
+#
+# The smoke run exists because the long one is unattended. Thirty steps at batch 8 walks
+# the whole path - corpus, synthesis, context trimming, encoder, head, checkpoint write -
+# in about a minute, so a mistake surfaces now rather than at three in the morning with
+# nine hours of machine time gone.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+PY=.venv/bin/python
+STEPS=${STEPS:-40000}
+OUT=runs/prefix-${STEPS}
+SMOKE_ONLY=0
+FORCE=0
+for arg in "$@"; do
+  case "$arg" in
+    --smoke) SMOKE_ONLY=1 ;;
+    --force) FORCE=1 ;;
+    *) echo "unknown flag: $arg" >&2; exit 1 ;;
+  esac
+done
+
+if [ ! -x "$PY" ]; then
+  echo "No .venv here. Create it with:" >&2
+  echo "  python3.14 -m venv .venv && .venv/bin/pip install -e '.[ml,mac,dev]'" >&2
+  exit 1
+fi
+
+if [ -e "$OUT" ] && [ "$FORCE" = 0 ]; then
+  echo "$OUT already exists. Pass --force to replace it, or set STEPS to something else." >&2
+  exit 1
+fi
+
+mkdir -p runs
+echo "--- smoke: 30 steps through the whole pipeline"
+rm -rf runs/smoke
+if ! "$PY" scripts/train.py --steps 30 --batch-size 8 --eval-every 20 --eval-examples 64 \
+     --out runs/smoke > runs/smoke.log 2>&1; then
+  echo "Smoke run failed. What it said:" >&2
+  tail -25 runs/smoke.log >&2
+  exit 1
+fi
+if [ ! -f runs/smoke/checkpoint.pt ]; then
+  echo "Smoke run finished without writing a checkpoint; see runs/smoke.log" >&2
+  exit 1
+fi
+grep -E "^  (step|eval)" runs/smoke.log | tail -3
+rm -rf runs/smoke runs/smoke.log
+echo "--- smoke passed"
+
+if [ "$SMOKE_ONLY" = 1 ]; then
+  echo "Smoke only, nothing launched. Drop --smoke to start the real run."
+  exit 0
+fi
+
+# Same shape as the run that produced the last checkpoint, so the two are comparable
+# except for what actually changed.
+rm -rf "$OUT"
+nohup "$PY" scripts/train.py --steps "$STEPS" --batch-size 256 \
+  --eval-every 1000 --eval-examples 3000 --out "$OUT" > runs/train-prefix.log 2>&1 &
+echo "--- launched pid $! -> $OUT, logging to runs/train-prefix.log"
+echo "    roughly $(( STEPS * 256 / 315 / 3600 )) hours at the last run's 315 examples a second"
+sleep 90
+grep -E "^  (step|eval)" runs/train-prefix.log | tail -4 || {
+  echo "No progress lines yet. If that persists, check runs/train-prefix.log" >&2; }
+echo
+echo "It keeps running after this shell closes. When it finishes:"
+echo "  .venv/bin/python scripts/score_model.py --checkpoint $OUT/checkpoint.pt"
+echo "  ./steno --checkpoint $OUT/checkpoint.pt --dry-run"
