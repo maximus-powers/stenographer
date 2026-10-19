@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Start stenographer with one command.
 #
-#   ./steno              type for real, everywhere
-#   ./steno --dry-run    watch and print what it would have typed, change nothing
-#   ./steno --stop       stop a daemon left running in the background
+#   steno                type for real, everywhere
+#   steno stop           stop it
+#   steno --dry-run      watch and print what it would have typed, change nothing
+#
+# Hold right Option and press the word's opening letters together. Link this onto PATH
+# with:  ln -s "$PWD/steno" ~/.local/bin/steno
 #
 # There are two processes because a tap that stalls freezes the keyboard for every
 # application on the machine, so the model is not allowed to share with it. That is a
@@ -16,7 +19,16 @@
 # to the daemon, which is the process that holds the model.
 set -euo pipefail
 
-cd "$(dirname "$0")"
+# Resolve symlinks before finding the project: this is meant to be linked into a
+# directory on PATH, and $0 is then the link rather than the script, so a plain dirname
+# would cd into ~/.local/bin and find no venv there.
+SOURCE=$0
+while [ -L "$SOURCE" ]; do
+  LINK_DIR=$(cd -P "$(dirname "$SOURCE")" && pwd)
+  SOURCE=$(readlink "$SOURCE")
+  case "$SOURCE" in /*) ;; *) SOURCE="$LINK_DIR/$SOURCE" ;; esac
+done
+cd "$(cd -P "$(dirname "$SOURCE")" && pwd)"
 PY=.venv/bin/python
 
 if [ ! -x "$PY" ]; then
@@ -30,7 +42,10 @@ DAEMON_ARGS=()
 TAP_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --stop) STOP=1 ;;
+    # Bare words as well as flags: this gets started and stopped many times a day, and
+    # `steno stop` is what a hand types without thinking.
+    stop|--stop) STOP=1 ;;
+    start) ;;
     --cpu|--no-model) DAEMON_ARGS+=("$1") ;;
     # Takes a value, and only the daemon knows what to do with it.
     --checkpoint|--checkpoint=*)

@@ -36,6 +36,9 @@ class KeyEvent:
     caps_lock: bool = False
     autorepeat: bool = False
     command: bool = False  # Command, Control or Option held: a shortcut, never a chord
+    # The hold-to-chord key is down. The tap decides which physical key that is and sets
+    # this on every event, so the detector never has to know about keycodes or flag masks.
+    chord_modifier: bool = False
 
     @property
     def is_letter(self) -> bool:

@@ -48,7 +48,12 @@ def load_predictor(checkpoint: Path | None, vocab_dir: Path, cpu: bool):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--checkpoint", type=Path, default=Path("runs/distilbert-6m/checkpoint.pt"))
+    # The checkpoint ./retrain produces. The older runs/distilbert-6m was trained against
+    # a candidate rule this no longer uses - 65% of its examples were briefs that do not
+    # resolve now - so pointing at it silently serves worse predictions than no model.
+    parser.add_argument(
+        "--checkpoint", type=Path, default=Path("runs/prefix-40000/checkpoint.pt")
+    )
     parser.add_argument("--vocab", type=Path, default=Path("data/vocab"))
     parser.add_argument("--socket", type=Path, default=None)
     parser.add_argument("--cpu", action="store_true")

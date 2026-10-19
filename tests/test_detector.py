@@ -191,7 +191,7 @@ def test_rollover_typing_is_not_a_chord(overlap):
 
 def test_two_keys_held_together_long_enough_is_a_chord():
     detector = ChordDetector()
-    actions = run(detector, [down("t", 0), down("o", 20), up("t", 150), up("o", 160)])
+    actions = run(detector, [down("t", 0), down("o", 20), up("t", 180), up("o", 190)])
     assert chords(actions) == ["ot"]
 
 
@@ -204,7 +204,8 @@ def test_two_keys_with_too_little_overlap_are_letters():
 
 
 def test_the_two_key_overlap_threshold_is_the_boundary():
-    config = DetectorConfig(two_key_overlap_ms=60.0)
+    # min_overlap_ms off, so this measures the pair-specific threshold on its own.
+    config = DetectorConfig(two_key_overlap_ms=60.0, min_overlap_ms=0.0)
     just_short = ChordDetector(config)
     assert chords(run(just_short, [down("t", 0), down("o", 20), up("t", 79), up("o", 90)])) == []
     just_enough = ChordDetector(config)
@@ -223,17 +224,20 @@ def test_a_second_press_after_the_window_starts_a_new_group():
 # -- a chord may be formed slowly -----------------------------------------------
 
 
-@pytest.mark.parametrize("spread", [20, 60, 120, 180, 220])
+@pytest.mark.parametrize("spread", [20, 60, 120, 160])
 def test_a_chord_can_be_formed_slowly(spread):
-    """Fingers may arrive over most of the window, so long as none has left yet.
+    """Fingers may arrive over much of the window, so long as they then stay down.
 
-    This is what the 300 ms budget is for: there is no need to hit the keys at the same
-    instant, only to have them all down together at some point before lifting.
+    There is still no need to hit the keys at the same instant. What changed is that
+    having been down together once is no longer enough - `min_overlap_ms` asks for a
+    duration - so the 300 ms budget now has to cover the arrival and the hold both. That
+    is why the spread stops at 180 rather than 220: 220 ms of arrival leaves less than
+    the hold needs, and a gesture that slow is no longer read as a chord.
     """
     detector = ChordDetector()
     step = spread / 2
     events = [down("t", 0), down("h", step), down("e", spread)]
-    events += [up(k, spread + 40 + i * 10) for i, k in enumerate("the")]
+    events += [up(k, spread + 110 + i * 10) for i, k in enumerate("the")]
     assert chords(run(detector, events)) == ["eht"]
 
 
@@ -300,7 +304,8 @@ def test_the_shipped_window_is_300_ms():
     config = DetectorConfig()
     assert config.chord_max_ms == 300.0
     assert config.lone_hold_ms == 300.0
-    assert config.two_key_overlap_ms == 60.0
+    assert config.two_key_overlap_ms == 150.0
+    assert config.min_overlap_ms == 100.0
 
 
 def test_the_time_limit_is_configurable():
@@ -341,8 +346,8 @@ def test_caps_lock_is_reported():
         [
             down("t", 0, caps_lock=True),
             down("h", 12, caps_lock=True),
-            up("t", 150),
-            up("h", 160),
+            up("t", 175),
+            up("h", 185),
         ],
     )
     commit = next(a for a in actions if isinstance(a, CommitChord))
@@ -551,3 +556,66 @@ def test_no_pending_state_is_left_behind_after_a_burst():
     run(detector, events)
     assert detector.group is None
     assert detector.pending_release == set()
+
+
+# -- the hold-to-chord key as it actually arrives ---------------------------------
+
+def _flags(t_ms: float, *, held: bool) -> KeyEvent:
+    """The modifier change the tap reports when the hold-to-chord key moves."""
+    return KeyEvent(kind=Kind.FLAGS, t_ms=t_ms, chord_modifier=held)
+
+
+def test_the_modifier_arrives_as_a_flags_event_and_opens_a_chord():
+    # The explicit set_chord_modifier call is the unit-test entry point; in production the
+    # key is only ever seen as a modifier change, so that path has to work on its own.
+    detector = ChordDetector(DetectorConfig(trigger=Trigger.HOLD_TO_CHORD))
+    actions = run(
+        detector,
+        [
+            _flags(0, held=True),
+            down("t", 10),
+            down("h", 22),
+            down("e", 32),
+            up("t", 150),
+            up("h", 160),
+            up("e", 170),
+        ],
+    )
+    assert chords(actions) == ["eht"]
+
+
+def test_a_flags_event_passes_through_as_well_as_setting_the_modifier():
+    # Swallowing it would leave the application thinking the key is still down.
+    detector = ChordDetector(DetectorConfig(trigger=Trigger.HOLD_TO_CHORD))
+    actions = detector.feed(_flags(0, held=True))
+    assert any(isinstance(action, PassThrough) for action in actions)
+    assert detector.chord_modifier_down is True
+
+
+def test_releasing_the_modifier_as_a_flags_event_commits_the_group():
+    detector = ChordDetector(DetectorConfig(trigger=Trigger.HOLD_TO_CHORD))
+    for event in [_flags(0, held=True), down("t", 10), down("o", 20)]:
+        detector.feed(event)
+    actions = detector.feed(_flags(100, held=False))
+    assert chords(actions) == ["ot"]
+
+
+def test_typing_without_the_modifier_is_never_a_chord():
+    # The whole point of hold-to-chord: no timing a typist can produce makes a chord.
+    detector = ChordDetector(DetectorConfig(trigger=Trigger.HOLD_TO_CHORD))
+    actions = run(
+        detector,
+        [down("t", 0), down("h", 2), down("e", 4), up("t", 6), up("h", 8), up("e", 10)],
+    )
+    assert chords(actions) == []
+    assert passed(actions) == "the"
+
+
+def test_a_repeated_flags_event_does_not_re_commit():
+    detector = ChordDetector(DetectorConfig(trigger=Trigger.HOLD_TO_CHORD))
+    for event in [_flags(0, held=True), down("t", 10), down("o", 20)]:
+        detector.feed(event)
+    first = detector.feed(_flags(100, held=False))
+    second = detector.feed(_flags(110, held=False))
+    assert chords(first) == ["ot"]
+    assert chords(second) == []

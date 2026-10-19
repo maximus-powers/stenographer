@@ -45,6 +45,21 @@ KEYBOARD_MASK = (
     | Quartz.CGEventMaskBit(Quartz.kCGEventFlagsChanged)
 )
 
+# Which modifier holding down means "the letters I press now are a chord". Both are keys
+# an ordinary typist never holds while writing prose, which is the whole point: unlike a
+# timing threshold, a held key cannot be tripped by fast typing.
+#
+# Left and right Option raise the same Alternate flag, so only these device-dependent bits
+# distinguish them. They are not exposed by the Quartz bindings; the values come from
+# IOKit's NX_DEVICE*ALTKEYMASK.
+_LEFT_OPTION_DEVICE = 0x00000020
+_RIGHT_OPTION_DEVICE = 0x00000040
+
+_CHORD_KEY_MASKS = {
+    "right-option": _RIGHT_OPTION_DEVICE,
+    "fn": Quartz.kCGEventFlagMaskSecondaryFn,
+}
+
 # The system reports these two through the callback in place of a real event.
 DISABLED_EVENTS = {
     Quartz.kCGEventTapDisabledByTimeout,
@@ -116,9 +131,12 @@ class EventTap:
         timer_interval: float = 0.005,
         health_interval: float = 5.0,
         on_lost_events: Callable[[], None] | None = None,
+        chord_key: str | None = None,
     ) -> None:
         self.handler = handler
         self.listen_only = listen_only
+        self.chord_key = chord_key
+        self.chord_mask = _CHORD_KEY_MASKS.get(chord_key or "", 0)
         self.on_timer = on_timer
         self.timer_interval = timer_interval
         self.health_interval = health_interval
@@ -269,12 +287,27 @@ class EventTap:
             shift=bool(flags & Quartz.kCGEventFlagMaskShift),
             caps_lock=bool(flags & Quartz.kCGEventFlagMaskAlphaShift),
             autorepeat=autorepeat,
-            command=bool(
-                flags
-                & (
-                    Quartz.kCGEventFlagMaskCommand
-                    | Quartz.kCGEventFlagMaskControl
-                    | Quartz.kCGEventFlagMaskAlternate
-                )
-            ),
+            command=self._is_shortcut(flags),
+            chord_modifier=bool(self.chord_mask and flags & self.chord_mask),
         )
+
+    def _is_shortcut(self, flags: int) -> bool:
+        """Whether these flags mean a shortcut rather than text.
+
+        Holding the hold-to-chord key is not a shortcut, or every chord made under it
+        would be discarded as one. When that key is right Option the exemption has to be
+        narrow: left Option still starts a shortcut, and only the device bits tell the two
+        Options apart, since both raise the same Alternate flag.
+        """
+        mask = (
+            Quartz.kCGEventFlagMaskCommand
+            | Quartz.kCGEventFlagMaskControl
+            | Quartz.kCGEventFlagMaskAlternate
+        )
+        if (
+            self.chord_key == "right-option"
+            and flags & _RIGHT_OPTION_DEVICE
+            and not flags & _LEFT_OPTION_DEVICE
+        ):
+            mask &= ~Quartz.kCGEventFlagMaskAlternate
+        return bool(flags & mask)

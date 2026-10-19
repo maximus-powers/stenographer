@@ -16,9 +16,10 @@ start of the word. A doubled letter costs no key, since a hand cannot press it t
 once, so the first four of "little" are l, i, t, e.
 
 You have 300 ms to form a chord, measured from the first key going down to the last one
-coming up, which leaves about 220 ms for your fingers to arrive. There is no need to hit
-the keys at the same instant, only to have them all down together at some point before
-you lift.
+coming up. There is no need to hit the keys at the same instant, but they do have to stay
+down together for 100 ms once they are all there, which is what tells a chord apart from
+ordinary typing. That hold has to fit inside the window too, so fingers have about 160 ms
+to arrive rather than the whole budget.
 
 ## Does it actually save time?
 
@@ -107,22 +108,33 @@ baseline on identical trials, so the difference is what context bought and nothi
 ### Running it for real
 
 ```bash
-./steno --dry-run    # watch and print what it would have typed, change nothing
-./steno              # for real, in every application
-./steno --stop       # stop a daemon left running in the background
+steno                # for real, in every application
+steno stop           # stop it
+steno --dry-run      # watch and print what it would have typed, change nothing
 ```
 
-**Start with `--dry-run`.** It watches without touching anything and prints what it would
-have done. It is the only safe way to find out whether the timing thresholds suit your
-hands before letting it rewrite what you type.
+Link it onto your PATH once and it works from any directory:
+
+```bash
+ln -s "$PWD/steno" ~/.local/bin/steno
+```
+
+**Hold right Option and press the word's opening letters together.** Release, and the word
+is typed with a space after it. Let go of right Option and you are typing normally again.
+`--chord-key fn` moves it to the Fn key, which is worth doing if you use right Option for
+special characters, since while this runs the tap consumes those keystrokes.
+
+**`--dry-run` watches without touching anything** and prints what it would have done. Use
+it before changing a timing threshold, and to see what the model would have picked.
 
 Once it is running it is running everywhere: an event tap sees the keyboard for the whole
 login session, not one application. Ctrl-C stops it.
 
-`./steno` checks Accessibility permission before it loads anything, starts the prediction
+`steno` checks Accessibility permission before it loads anything, starts the prediction
 daemon if one is not already up, waits for the model, and runs the tap in front. Flags it
-does not recognise go to the tap, so `./steno --dry-run --chord-max 700` works; `--cpu`
-and `--no-model` go to the daemon. The daemon's own output goes to `runs/stenod.log`.
+does not recognise go to the tap, so `steno --dry-run --chord-max 700` works; `--cpu`,
+`--no-model` and `--checkpoint` go to the daemon. The daemon's own output goes to
+`runs/stenod.log`.
 
 There are two processes because a tap that stalls freezes the keyboard for every
 application on the machine, so the model may not share with it. To run them by hand:
@@ -186,24 +198,43 @@ so ordinary typing never gets three keys down together however fast it goes, whi
 deliberate press can be made as slowly as the hand likes. Keys still down when the window
 runs out are fingers resting on the keyboard, not a chord.
 
-The window is not what keeps ordinary typing out, which is why it can be set to what a
-hand needs rather than to the widest value that stays safe. It has to cover the whole
-gesture including the release, so half a second means fingers arriving over about 420 ms.
+The window is not what keeps ordinary typing out. **The hold is.** Every key in a group
+has to stay down together for `--min-overlap`, 100 ms by default, and that is measured
+from the last key arriving to the first one leaving.
 
-Two keys are the weak case, because a pair overlapping is exactly what rollover looks
-like, so a pair also has to be held together for 60 ms to count. All three numbers are
-flags: `--chord-max`, `--lone-hold`, `--overlap`.
+This was learned the hard way. The duration test used to apply only to pairs, so three or
+more keys became a chord on the strength of a single instant with all of them down -
+which is exactly what fast typing produces, because a typist presses the next key before
+releasing the last. Run against real prose it fired on 1.7% of emissions, turning "when"
+into "what en" and "use" into "us e". Requiring a duration, at every group size, is what
+makes an always-on trigger safe.
+
+Two keys remain the weak case, because a pair overlapping is the commonest thing rollover
+does, so a pair has to be held for 150 ms rather than 100. The numbers are flags:
+`--chord-max`, `--lone-hold`, `--overlap`, `--min-overlap`.
+
+These are provisional. They are set above the overlap real typing was measured producing
+and below what a deliberate press holds, but the honest way to set them is
+`scripts/chord_drill.py` against the hands that will use them. If chords are being missed,
+lower `--min-overlap`; if ordinary typing still fires one, raise it, and use
+`--trigger hold_to_chord` while you decide.
 
 Waiting for your fingers to lift costs ordinary typing nothing, which is easy to get
 wrong. A single keystroke is decided the moment it is released, not when the window
 expires, so the letter appears as the finger comes up. What it does affect is holding a
 letter key down to repeat it, where the first character waits out `--lone-hold`.
 
-Two alternatives are one config flag away, because which one suits real hands is a
-question for the dry run rather than for a design document. `--trigger optimistic` types
+`hold_to_chord` is the default, and the reason is a measurement rather than a preference.
+Run against real typing, `holdback` read ordinary rollover as deliberate chords on 1.7% of
+emissions even at `--min-keys 3` - "when" became "what en", "use" became "us e" - because
+a fast typist presses the next key before releasing the last, which is exactly what the
+simultaneity rule looks for. Holding a key cannot be done by accident, so hold-to-chord
+has no false-positive rate to tune.
+
+The other two remain one flag away. `--trigger holdback` decides by timing alone and needs
+its thresholds fitted to your hands in a dry run first. `--trigger optimistic` types
 letters immediately and takes them back when a chord forms, costing no latency but
-flickering. `--trigger hold_to_chord` only forms chords while a modifier is held, which
-cannot produce a false chord at all.
+flickering.
 
 **Around the word.** A committed word gets a space after it, so chords run together into
 a sentence without touching the space bar. Punctuation typed next pulls that space back,

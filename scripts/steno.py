@@ -96,6 +96,7 @@ def build(args) -> tuple[Runtime, EventTap, Emitter, Predictor, BrainClient | No
             chord_max_ms=args.chord_max,
             lone_hold_ms=args.lone_hold,
             two_key_overlap_ms=args.overlap,
+            min_overlap_ms=args.min_overlap,
             min_keys=args.min_keys,
             max_keys=args.max_keys,
             trigger=Trigger(args.trigger),
@@ -140,6 +141,9 @@ def build(args) -> tuple[Runtime, EventTap, Emitter, Predictor, BrainClient | No
         listen_only=args.dry_run,
         on_timer=runtime.on_timer,
         on_lost_events=lambda: runtime.detector.reset(),
+        # Only hold-to-chord reads this key. Passing it in the other modes would exempt
+        # right Option from being a shortcut for no reason.
+        chord_key=args.chord_key if args.trigger == "hold_to_chord" else None,
     )
     runtime.layout = tap.layout
     return runtime, tap, emitter, predictor, client
@@ -152,19 +156,53 @@ def main() -> None:
     parser.add_argument("--socket", type=Path, default=None)
     parser.add_argument("--no-daemon", action="store_true", help="frequency index only")
     parser.add_argument("--deadline", type=float, default=50.0, help="ms to wait for the daemon")
+    # Defaults come from DetectorConfig rather than being written out again. They were
+    # written out, and they drifted: --overlap still said 60 ms after the dataclass moved
+    # to 150, and since the flag is always passed the dataclass value never reached the
+    # detector at all.
+    timing = DetectorConfig()
     parser.add_argument(
-        "--chord-max", type=float, default=300.0, help="ms a whole chord gesture may take"
+        "--chord-max",
+        type=float,
+        default=timing.chord_max_ms,
+        help="ms a whole chord gesture may take",
     )
     parser.add_argument(
-        "--lone-hold", type=float, default=300.0, help="ms to hold a single key back"
+        "--lone-hold",
+        type=float,
+        default=timing.lone_hold_ms,
+        help="ms to hold a single key back",
     )
-    parser.add_argument("--overlap", type=float, default=60.0, help="ms of overlap a pair needs")
-    parser.add_argument("--min-keys", type=int, default=2)
-    parser.add_argument("--max-keys", type=int, default=6)
+    parser.add_argument(
+        "--overlap",
+        type=float,
+        default=timing.two_key_overlap_ms,
+        help="ms a pair must be held together",
+    )
+    parser.add_argument(
+        "--min-overlap",
+        type=float,
+        default=timing.min_overlap_ms,
+        help="ms every key in a group must be held together",
+    )
+    parser.add_argument("--min-keys", type=int, default=timing.min_keys)
+    parser.add_argument("--max-keys", type=int, default=timing.max_keys)
+    # Always on, which is the point: nothing to hold, nothing to remember. What makes it
+    # safe is the duration rule in the detector rather than this choice - before that, a
+    # group of three or more became a chord on a single instant with every key down, and
+    # ordinary rollover produces those constantly. `--trigger hold_to_chord` is the
+    # fallback if the thresholds still do not suit a particular pair of hands, and it
+    # cannot false-fire at all.
     parser.add_argument(
         "--trigger", default="holdback", choices=[t.value for t in Trigger]
     )
     parser.add_argument("--cycle-key", default="tab", choices=["tab", "right-option"])
+    parser.add_argument(
+        "--chord-key",
+        default="right-option",
+        choices=["right-option", "fn"],
+        help="key to hold for a chord, with --trigger hold_to_chord",
+    )
     parser.add_argument("--no-auto-space", action="store_true")
     parser.add_argument("--gap", type=float, default=0.0, help="ms between injected events")
     parser.add_argument("--verbose", action="store_true")
@@ -182,14 +220,26 @@ def main() -> None:
         print("Run: python scripts/check_permissions.py")
         raise SystemExit(1)
 
+    if args.trigger == "hold_to_chord" and args.chord_key == args.cycle_key:
+        print(
+            f"--chord-key and --cycle-key are both {args.cycle_key}. "
+            "Holding it would open a chord and cycle the last one at the same time."
+        )
+        raise SystemExit(2)
+
     runtime, tap, emitter, predictor, client = build(args)
 
     print("stenographer")
     print(f"  mode          {'dry run, nothing is typed' if args.dry_run else 'live'}")
-    print(f"  trigger       {args.trigger}, {args.min_keys}+ keys")
+    if args.trigger == "hold_to_chord":
+        held = "right Option" if args.chord_key == "right-option" else "Fn"
+        print(f"  trigger       hold {held} and press the word's first letters")
+    else:
+        print(f"  trigger       {args.trigger}, {args.min_keys}+ keys")
     print(
-        f"  timing        up to {args.chord_max:.0f} ms per chord, "
-        f"single key held {args.lone_hold:.0f} ms, pair overlap {args.overlap:.0f} ms"
+        f"  timing        up to {args.chord_max:.0f} ms per chord, held together "
+        f"{args.min_overlap:.0f} ms ({args.overlap:.0f} for a pair), "
+        f"single key held {args.lone_hold:.0f} ms"
     )
     print(f"  predictions   {'local frequency index' if client is None else f'daemon at {args.socket or socket_path()}'}")
     if secure_input_enabled():

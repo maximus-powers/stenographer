@@ -64,7 +64,20 @@ class DetectorConfig:
     # going down to the first coming up. Two keys overlapping is the single weakest
     # signal there is, because that is exactly what fast typing looks like, so a pair has
     # to be held together long enough to be deliberate.
-    two_key_overlap_ms: float = 60.0
+    # Pairs stay stricter than the general rule below, because two keys overlapping is
+    # the weakest evidence there is. Raised from 60 ms, which real typing was measured
+    # clearing routinely.
+    two_key_overlap_ms: float = 150.0
+    # The same requirement for a group of any size, and the one that makes an always-on
+    # trigger safe. Until this existed the duration test applied only to pairs, so three
+    # or more keys became a chord on the strength of a single instant with every key down
+    # - which is what fast typing produces constantly, and why "when" came out as
+    # "what en".
+    #
+    # 120 ms is provisional, chosen above the overlap that ordinary typing was measured
+    # producing for pairs at 60 ms, and well under the 200 ms a deliberate press holds.
+    # It wants replacing with a number read off a dry run of the hands that will use it.
+    min_overlap_ms: float = 100.0
     min_keys: int = 2
     # Laptop keyboards register about six non-modifier keys at once; more than that means
     # ghosting or a rollover burst rather than a chord.
@@ -121,6 +134,7 @@ class CommitChord(Action):
     shift: bool
     caps_lock: bool
     t_ms: float
+    overlap_ms: float = 0.0  # how long every key was down together, for tuning
 
 
 @dataclass(frozen=True)
@@ -174,6 +188,17 @@ class Group:
     def first_release_ms(self) -> float | None:
         return min(self.released_at.values()) if self.released_at else None
 
+    def overlap_ms(self, t_ms: float) -> float:
+        """How long every key in the group was down at the same time.
+
+        From the last key going down to the first one coming up. This is the measure that
+        separates a deliberate press from rollover: a hand that meant a chord holds it,
+        while typing that happens to overlap is through the position in a few
+        milliseconds.
+        """
+        release = self.first_release_ms()
+        return (release if release is not None else t_ms) - self.last_down_ms
+
 
 class ChordDetector:
     """Classifies keystrokes as chords or ordinary letters."""
@@ -192,7 +217,13 @@ class ChordDetector:
         if not self.enabled:
             return [PassThrough(event)]
         if event.kind is Kind.FLAGS:
-            return [PassThrough(event)]
+            # The hold-to-chord key is not a keystroke: it arrives as a modifier change.
+            # Releasing it while a group is open is what decides that group, so the
+            # actions from that have to come out ahead of the passed-through event.
+            actions: list[Action] = []
+            if event.chord_modifier != self.chord_modifier_down:
+                actions.extend(self.set_chord_modifier(event.chord_modifier, event.t_ms))
+            return [*actions, PassThrough(event)]
         if not event.is_letter:
             return self._non_letter(event)
         return self._letter_down(event) if event.is_down else self._letter_up(event)
@@ -343,6 +374,7 @@ class ChordDetector:
                 shift=group.shift,
                 caps_lock=group.caps_lock,
                 t_ms=t_ms,
+                overlap_ms=group.overlap_ms(t_ms),
             )
         )
         return actions
@@ -360,12 +392,21 @@ class ChordDetector:
             # Still held when the time ran out: fingers resting on the keyboard, or a
             # gesture too slow to have been meant as one.
             return False
-        if count == 2:
-            release = group.first_release_ms()
-            overlap = (release if release is not None else t_ms) - group.last_down_ms
-            if overlap < config.two_key_overlap_ms:
-                return False
-        return True
+        overlap = group.overlap_ms(t_ms)
+        # Holding the chord key is itself the statement of intent, so the duration tests
+        # below do not apply to it. They exist only to tell a deliberate press from
+        # rollover, a question that mode has already answered.
+        if config.trigger is Trigger.HOLD_TO_CHORD:
+            return True
+        if overlap < config.min_overlap_ms:
+            # Every key was down together, but only in passing. Requiring a duration and
+            # not just an instant is what separates a held chord from rollover, and it has
+            # to apply at every size: three keys brush past each other in fast typing as
+            # readily as two.
+            return False
+        # A pair is the commonest thing rollover produces, so it is held to a longer hold
+        # than the general rule asks for.
+        return not (count == 2 and overlap < config.two_key_overlap_ms)
 
     def _flush_as_letters(self, group: Group, *, synthetic_up: bool) -> list[Action]:
         if self.config.trigger is Trigger.OPTIMISTIC:
